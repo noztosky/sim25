@@ -88,6 +88,19 @@ public class AirSim : ModuleRules
 
         PublicIncludePaths.Add(Path.Combine(AirLibPath, "include"));
         PublicIncludePaths.Add(Path.Combine(AirLibPath, "deps", "eigen3"));
+        // Ensure module root and nested source folders are on include path
+        PublicIncludePaths.Add(ModuleDirectory);
+        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Vehicles"));
+        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Vehicles", "Multirotor"));
+        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "SimHUD"));
+        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "SimMode"));
+
+        // Also add to PrivateIncludePaths for .cpp in this module (e.g., SimHUD.cpp)
+        PrivateIncludePaths.Add(ModuleDirectory);
+        PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "Vehicles"));
+        PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "Vehicles", "Multirotor"));
+        PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "SimHUD"));
+        PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "SimMode"));
         AddOSLibDependencies(Target);
 
         SetupCompileMode(CompileMode.HeaderOnlyWithRpc, Target);

@@ -1,0 +1,61 @@
+#include "xlabSim.h"
+#include "Engine/Engine.h"
+#include "Async/Async.h"
+#include "Misc/DateTime.h"
+#include "vehicles/multirotor/api/MultirotorRpcLibClient.hpp"
+
+AxlabSim::AxlabSim() {
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = true;
+}
+
+AxlabSim::~AxlabSim() {}
+
+void AxlabSim::BeginPlay()
+{
+    Super::BeginPlay();
+    SetActorTickEnabled(true);
+    __xlogC(FColor::Cyan, 5.0f, "xlabSim Build #%d", BuildNumber);
+    _m.rpc = new msr::airlib::MultirotorRpcLibClient();
+    _m.phase.status = EFlightPhase::None;
+    _m.phase.isCommandIssued = false;
+    _m.startTime = static_cast<float>(FDateTime::UtcNow().ToUnixTimestamp());
+
+    __xlogC(FColor::Blue, 3.0f, "xlabSim initialized");
+}
+
+void AxlabSim::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    __xlog("xlabSim destroyed");
+    if (_m.rpc)
+    {
+        delete _m.rpc;
+        _m.rpc = nullptr;
+    }
+    Super::EndPlay(EndPlayReason);
+}
+
+void AxlabSim::Takeoff()
+{
+    _m.rpc->takeoffAsync(20.0f, VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName));
+}
+
+void AxlabSim::Tick(float DeltaTime) {
+    Super::Tick(DeltaTime);
+    
+    if (_m.phase.isCommandIssued == false)
+    {
+        switch (_m.phase.status)
+        {
+            case EFlightPhase::None:
+                _m.phase.status = EFlightPhase::Takeoff;
+                 Takeoff();
+                 __xlog(FColor::Blue, 3.0f,"Takeoff command issued");
+                break;
+            case EFlightPhase::Takeoff:
+                break;
+        }
+
+        _m.phase.isCommandIssued = true;
+    }
+}

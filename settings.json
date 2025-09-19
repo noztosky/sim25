@@ -1,0 +1,31 @@
+{
+  "SeeDocsAt": "https://github.com/Microsoft/AirSim/blob/main/docs/settings_json.md",
+  "SettingsVersion": 1.2,
+  "SimMode": "Multirotor",
+  "ClockSpeed": 1.0,
+  "Vehicles": {
+    "SimpleFlight": {
+      "VehicleType": "SimpleFlight",
+      "DefaultVehicleState": "Armed",
+      "EnableCollisionPassthrogh": false,
+      "EnableCollisions": true,
+      "AllowAPIAlways": true,
+      "RC": {
+        "RemoteControlID": 0,
+        "AllowAPIWhenDisconnected": false
+      }
+    }
+  },
+  "AutoTakeoff": true,
+  "TakeoffAltitude": 5.0,
+  "InitialVehicleState": "Armed",
+  "ApiServerPort": 41451,
+  "ViewMode": "SpringArmChase",
+  "EnableApi": true,
+  "LogMessagesVisible": true,
+  "ShowDebugText": true,
+  "DebugTextFontSize": 12,
+  "DebugTextPosition": "TopLeft",
+  "DebugTextColor": [1.0, 1.0, 1.0, 1.0],
+  "DebugTextBackgroundColor": [0.0, 0.0, 0.0, 0.5]
+}
