@@ -7,20 +7,12 @@ namespace msr { namespace airlib { class MultirotorRpcLibClient; } }
 
 #define __xlog(fmt, ...) \
 do { \
-  UE_LOG(LogTemp, Log, TEXT(fmt), ##__VA_ARGS__); \
-  if (GEngine) { \
-    GEngine->AddOnScreenDebugMessage( \
-      -1, 3.0f, FColor::Blue, FString::Printf(TEXT(fmt), ##__VA_ARGS__)); \
-  } \
+  UE_LOG(LogTemp, Display, TEXT("### %s"), *FString::Printf(TEXT(fmt), ##__VA_ARGS__)); \
 } while (0)
 
 #define __xlogC(color, seconds, fmt, ...) \
 do { \
-  UE_LOG(LogTemp, Log, TEXT(fmt), ##__VA_ARGS__); \
-  if (GEngine) { \
-    GEngine->AddOnScreenDebugMessage( \
-      -1, seconds, color, FString::Printf(TEXT(fmt), ##__VA_ARGS__)); \
-  } \
+  UE_LOG(LogTemp, Display, TEXT("### %s"), *FString::Printf(TEXT(fmt), ##__VA_ARGS__)); \
 } while (0)
 
 UCLASS()
@@ -43,7 +35,7 @@ public:
     void Takeoff();
 
 
-    static constexpr int32 BuildNumber = 7;
+    static constexpr int32 BuildNumber = 12;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "xlabSim Settings")
     FString VehicleName = TEXT("SimpleFlight");

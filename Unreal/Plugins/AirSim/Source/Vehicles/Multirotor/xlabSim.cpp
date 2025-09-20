@@ -37,6 +37,7 @@ void AxlabSim::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AxlabSim::Takeoff()
 {
+    _m.rpc->armDisarm(true, VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName));
     _m.rpc->takeoffAsync(20.0f, VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName));
 }
 
@@ -50,7 +51,7 @@ void AxlabSim::Tick(float DeltaTime) {
             case EFlightPhase::None:
                 _m.phase.status = EFlightPhase::Takeoff;
                  Takeoff();
-                 __xlog(FColor::Blue, 3.0f,"Takeoff command issued");
+                 __xlogC(FColor::Blue, 3.0f, "Takeoff command issued");
                 break;
             case EFlightPhase::Takeoff:
                 break;
