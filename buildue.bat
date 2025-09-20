@@ -8,6 +8,9 @@ set "UPROJECT=%PROJECT_DIR%\Blocks.uproject"
 set "PLUGIN_XAIR=%ROOT_DIR%Unreal\Plugins\AirSim\Source\XAir"
 set "BLOCKS_PLUGIN_DIR=%PROJECT_DIR%\Plugins\AirSim"
 
+echo ===== copy pluugins ======
+robocopy "d:\open\airsim\Unreal\Plugins\AirSim\Source\Vehicles\Multirotor" "d:\open\airsim\Unreal\Environments\Blocks\Plugins\AirSim\Source\Vehicles\Multirotor" /E /COPY:DAT /R:0 /W:0 /NFL /NDL /NP /NJH /NJS
+
 echo ===== AirSim UE build (Blocks) =====
 
 REM 1) Kill processes

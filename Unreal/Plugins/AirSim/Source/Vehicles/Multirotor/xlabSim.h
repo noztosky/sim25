@@ -35,7 +35,7 @@ public:
     void Takeoff();
 
 
-    static constexpr int32 BuildNumber = 12;
+    static constexpr int32 BuildNumber = 15;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "xlabSim Settings")
     FString VehicleName = TEXT("SimpleFlight");
