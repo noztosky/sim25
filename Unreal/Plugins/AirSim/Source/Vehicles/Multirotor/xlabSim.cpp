@@ -16,11 +16,11 @@ void AxlabSim::BeginPlay()
     Super::BeginPlay();
     SetActorTickEnabled(true);
     __xlogC(FColor::Cyan, 5.0f, "xlabSim Build #%d", BuildNumber);
+
     _m.rpc = new msr::airlib::MultirotorRpcLibClient();
     _m.phase.status = EFlightPhase::None;
     _m.phase.isCommandIssued = false;
     _m.startTime = static_cast<float>(FDateTime::UtcNow().ToUnixTimestamp());
-
     __xlogC(FColor::Blue, 3.0f, "xlabSim initialized");
 }
 
@@ -37,11 +37,10 @@ void AxlabSim::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AxlabSim::Takeoff()
 {
+    //*
     Async(EAsyncExecution::ThreadPool, [this]() {
-        const char* name = VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName);
         try {
-            _m.rpc->confirmConnection();
-            _m.rpc->simPause(false);
+            const char* name = VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName);
             _m.rpc->enableApiControl(true, name);
             if (!_m.rpc->isApiControlEnabled(name)) { __xlog("API disabled"); return; }
             bool armed = _m.rpc->armDisarm(true, name);
@@ -53,6 +52,15 @@ void AxlabSim::Takeoff()
             __xlog("rpc exception");
         }
     });
+    /*/
+    //const char* name = VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName);
+    //_m.rpc->enableApiControl(true, name);
+    if (!_m.rpc->isApiControlEnabled(name)) { __xlog("API disabled"); return; }
+    bool armed = _m.rpc->armDisarm(true, name);
+    __xlog("armed=%d", (int)armed);
+    _m.rpc->takeoff(20.0f, name);
+    auto st = _m.rpc->getMultirotorState(name);
+    //*/
 }
 
 void AxlabSim::Tick(float DeltaTime) {

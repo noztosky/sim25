@@ -35,7 +35,7 @@ public:
     void Takeoff();
 
 
-    static constexpr int32 BuildNumber = 15;
+    static constexpr int32 BuildNumber = 17;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "xlabSim Settings")
     FString VehicleName = TEXT("SimpleFlight");
@@ -59,8 +59,7 @@ private:
         struct{
             EFlightPhase status = EFlightPhase::None;
             bool isCommandIssued = false;
-        }phase;
-        
+        }phase;        
 
         float startTime = 0.0f;
     }_m;
