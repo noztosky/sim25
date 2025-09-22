@@ -33,9 +33,14 @@ public:
 
     void loop();
     void Takeoff();
+    void Yawing();
+    UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
+    void StopCommands();
+    UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
+    void StartYawing(float YawRateDegPerSec = 180.0f);
 
 
-    static constexpr int32 BuildNumber = 17;
+    static constexpr int32 BuildNumber = 19;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "xlabSim Settings")
     FString VehicleName = TEXT("SimpleFlight");
@@ -44,11 +49,11 @@ public:
     int32 ScenarioVersion = 1;
 
 private:
-
     enum class EFlightPhase
     {
         None,
         Takeoff,
+            Yawing,
         Land,
         Done
     };
@@ -61,6 +66,17 @@ private:
             bool isCommandIssued = false;
         }phase;        
 
+        struct{
+            float lastTime = 0.0f;
+            float nextSecs = 0.0f;
+        }time;
+
         float startTime = 0.0f;
+
+        struct{
+            bool isYawing = false;
+            float yawRateDegPerSec = 0.0f;
+            float holdZ = 0.0f;
+        }controls;
     }_m;
 };
