@@ -2,6 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
 #include "xlabSim.generated.h"
 namespace msr { namespace airlib { class MultirotorRpcLibClient; } }
 
@@ -38,9 +42,11 @@ public:
     void StopCommands();
     UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
     void StartYawing(float YawRateDegPerSec = 180.0f);
-
-
+    UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
+    float GetYawDeg() const;
+    void Arming();
     static constexpr int32 BuildNumber = 19;
+
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "xlabSim Settings")
     FString VehicleName = TEXT("SimpleFlight");
@@ -52,8 +58,9 @@ private:
     enum class EFlightPhase
     {
         None,
+        Arming,
         Takeoff,
-            Yawing,
+        Yawing,
         Land,
         Done
     };
@@ -78,5 +85,26 @@ private:
             float yawRateDegPerSec = 0.0f;
             float holdZ = 0.0f;
         }controls;
+        
+        struct{
+            float lastLogTime = 0.0f;
+            float intervalSecs = 1.0f;
+            float lastYawDeg = 0.0f;
+        }yaw;
+        
+        struct{
+            std::atomic<bool> stop{false};
+            std::atomic<long long> value{0};
+            float accum = 0.0f;
+            std::atomic<long long>  changed = 0;
+        }counter;
     }_m;
+    
+    std::thread _counterThread;
+    std::mutex _counterMutex;
+    std::condition_variable _counterCv;
+
+private:
+    void StartCounterThread();
+    void StopCounterThread();
 };
