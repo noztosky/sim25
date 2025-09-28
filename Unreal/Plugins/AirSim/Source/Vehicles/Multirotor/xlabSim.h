@@ -6,8 +6,12 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include "PhysicsEngine/BodyInstance.h"
 #include "xlabSim.generated.h"
 namespace msr { namespace airlib { class MultirotorRpcLibClient; } }
+class USphereComponent;
+class USceneComponent;
+class APawn;
 
 #define __xlog(fmt, ...) \
 do { \
@@ -45,7 +49,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
     float GetYawDeg() const;
     void Arming();
-    static constexpr int32 BuildNumber = 19;
+    static constexpr int32 BuildNumber = 29;
 
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "xlabSim Settings")
@@ -67,6 +71,7 @@ private:
 
     struct{
         msr::airlib::MultirotorRpcLibClient* rpc = nullptr;
+            std::atomic<bool> rpcReady{false};
 
         struct{
             EFlightPhase status = EFlightPhase::None;
@@ -98,13 +103,45 @@ private:
             float accum = 0.0f;
             std::atomic<long long>  changed = 0;
         }counter;
+
+        struct{
+            FVector linearVelocityWS = FVector::ZeroVector;
+            FVector linearAccelerationWS = FVector::ZeroVector;
+            FVector angularVelocityRad = FVector::ZeroVector;
+            FQuat orientation = FQuat::Identity;
+            FVector lastLinearVelocityWS = FVector::ZeroVector;
+            bool hasLastVelocity = false;
+            float timestamp = 0.0f;
+            bool valid = false;
+            float yawDeg = 0.0f;
+        }imu;
+
+        struct{
+            FCalculateCustomPhysics customPhysicsDelegate;
+            class UPrimitiveComponent* component = nullptr;
+            std::atomic<long long> calls{0};
+            bool bound = false;
+            long long lastCallsSnapshot = 0;
+            std::atomic<int> simulate{0};
+        }physics;
     }_m;
     
     std::thread _counterThread;
     std::mutex _counterMutex;
     std::condition_variable _counterCv;
+    UPROPERTY()
+    USphereComponent* PhysicsAnchor = nullptr;
+    UPROPERTY()
+    USceneComponent* SceneRoot = nullptr;
 
 private:
     void StartCounterThread();
     void StopCounterThread();
+    void UpdateImuFromPhysics(float DeltaTime);
+    void OnCalculateCustomPhysics(float DeltaTime, struct FBodyInstance* BodyInstance);
+    void TryBindPhysicsDelegate();
+    void FindTargetPawn();
+
+    UPROPERTY()
+    APawn* TargetPawn = nullptr;
 };
