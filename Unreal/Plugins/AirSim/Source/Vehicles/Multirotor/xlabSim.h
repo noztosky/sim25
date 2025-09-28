@@ -12,6 +12,7 @@ namespace msr { namespace airlib { class MultirotorRpcLibClient; } }
 class USphereComponent;
 class USceneComponent;
 class APawn;
+class UPrimitiveComponent;
 
 #define __xlog(fmt, ...) \
 do { \
@@ -49,7 +50,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
     float GetYawDeg() const;
     void Arming();
-    static constexpr int32 BuildNumber = 29;
+    static constexpr int32 BuildNumber = 30;
 
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "xlabSim Settings")
@@ -141,6 +142,7 @@ private:
     void OnCalculateCustomPhysics(float DeltaTime, struct FBodyInstance* BodyInstance);
     void TryBindPhysicsDelegate();
     void FindTargetPawn();
+    UPrimitiveComponent* FindSimulatingPrimitive(AActor* Actor) const;
 
     UPROPERTY()
     APawn* TargetPawn = nullptr;

@@ -16,20 +16,25 @@ void AxlabSim::TryBindPhysicsDelegate()
     if (_m.physics.bound && _m.physics.component && _m.physics.component->BodyInstance.bSimulatePhysics)
         return;
 
-    if (UPrimitiveComponent* root = Cast<UPrimitiveComponent>(GetRootComponent()))
+    UPrimitiveComponent* target = nullptr;
+    if (TargetPawn)
+        target = FindSimulatingPrimitive(TargetPawn);
+    if (!target)
+        target = Cast<UPrimitiveComponent>(GetRootComponent());
+    if (!target)
+        return;
+
+    _m.physics.component = target;
+    if (!target->BodyInstance.bSimulatePhysics)
     {
-        _m.physics.component = root;
-        if (!root->BodyInstance.bSimulatePhysics)
-        {
-            __xlog("enabling simulate physics on %s", *root->GetName());
-            root->SetSimulatePhysics(true);
-        }
-        _m.physics.customPhysicsDelegate = FCalculateCustomPhysics::CreateUObject(this, &AxlabSim::OnCalculateCustomPhysics);
-        root->BodyInstance.AddCustomPhysics(_m.physics.customPhysicsDelegate);
-        _m.physics.bound = true;
-        _m.physics.simulate.store(root->BodyInstance.bSimulatePhysics ? 1 : 0);
-        __xlog("physics (re)bound: %d simulate=%d", (int)_m.physics.bound, _m.physics.simulate.load());
+        __xlog("enabling simulate physics on %s", *target->GetName());
+        target->SetSimulatePhysics(true);
     }
+    _m.physics.customPhysicsDelegate = FCalculateCustomPhysics::CreateUObject(this, &AxlabSim::OnCalculateCustomPhysics);
+    target->BodyInstance.AddCustomPhysics(_m.physics.customPhysicsDelegate);
+    _m.physics.bound = true;
+    _m.physics.simulate.store(target->BodyInstance.bSimulatePhysics ? 1 : 0);
+    __xlog("physics (re)bound: %d simulate=%d on %s", (int)_m.physics.bound, _m.physics.simulate.load(), *target->GetName());
 }
 
 void AxlabSim::FindTargetPawn()
@@ -44,6 +49,21 @@ void AxlabSim::FindTargetPawn()
         TargetPawn = Cast<APawn>(actors[0]);
         __xlog("TargetPawn set: %s", *GetNameSafe(TargetPawn));
     }
+}
+
+UPrimitiveComponent* AxlabSim::FindSimulatingPrimitive(AActor* Actor) const
+{
+    if (!Actor) return nullptr;
+    TArray<UActorComponent*> comps;
+    Actor->GetComponents(UPrimitiveComponent::StaticClass(), comps);
+    for (UActorComponent* c : comps)
+    {
+        if (UPrimitiveComponent* p = Cast<UPrimitiveComponent>(c))
+        {
+            if (p->IsSimulatingPhysics()) return p;
+        }
+    }
+    return nullptr;
 }
 
 AxlabSim::AxlabSim() {
@@ -229,6 +249,10 @@ void AxlabSim::Tick(float DeltaTime) {
     if (!_m.physics.bound || (_m.physics.calls.load() == _m.physics.lastCallsSnapshot))
     {
         TryBindPhysicsDelegate();
+    }
+    if (_m.physics.component)
+    {
+        _m.physics.component->BodyInstance.AddCustomPhysics(_m.physics.customPhysicsDelegate);
     }
     _m.physics.lastCallsSnapshot = _m.physics.calls.load();
     if (!TargetPawn)
