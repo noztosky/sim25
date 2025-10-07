@@ -199,6 +199,27 @@ void ASimHUD::setUnrealEngineSettings()
     //we get error that GameThread has timed out after 30 sec waiting on render thread
     static const auto render_timeout_var = IConsoleManager::Get().FindConsoleVariable(TEXT("g.TimeoutForBlockOnRenderFence"));
     render_timeout_var->Set(300000);
+
+    // Physics substepping runtime override and readback
+    static const auto p_substepping = IConsoleManager::Get().FindConsoleVariable(TEXT("p.Substepping"));
+    static const auto p_maxsubstep_dt = IConsoleManager::Get().FindConsoleVariable(TEXT("p.MaxSubstepDeltaTime"));
+    static const auto p_maxsubsteps = IConsoleManager::Get().FindConsoleVariable(TEXT("p.MaxSubsteps"));
+
+    if (p_substepping) p_substepping->Set(1);
+    if (p_maxsubstep_dt) p_maxsubstep_dt->Set(0.010f);
+    if (p_maxsubsteps) p_maxsubsteps->Set(10);
+
+    UKismetSystemLibrary::ExecuteConsoleCommand(GetWorld(), FString("p.Substepping 1"));
+    UKismetSystemLibrary::ExecuteConsoleCommand(GetWorld(), FString("p.MaxSubstepDeltaTime 0.010"));
+    UKismetSystemLibrary::ExecuteConsoleCommand(GetWorld(), FString("p.MaxSubsteps 10"));
+
+    const int sub_enabled = p_substepping ? p_substepping->GetInt() : -1;
+    const float sub_dt = p_maxsubstep_dt ? p_maxsubstep_dt->GetFloat() : -1.0f;
+    const int sub_max = p_maxsubsteps ? p_maxsubsteps->GetInt() : -1;
+    UAirBlueprintLib::LogMessageString(
+        "PhysicsSubstep",
+        std::string(TCHAR_TO_ANSI(*FString::Printf(TEXT("enabled=%d dt=%.3f max=%d"), sub_enabled, sub_dt, sub_max))),
+        LogDebugLevel::Informational);
 }
 
 void ASimHUD::setupInputBindings()

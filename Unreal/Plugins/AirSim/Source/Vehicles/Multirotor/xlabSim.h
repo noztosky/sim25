@@ -50,7 +50,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
     float GetYawDeg() const;
     void Arming();
-    static constexpr int32 BuildNumber = 30;
+    static constexpr int32 BuildNumber = 31;
 
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "xlabSim Settings")
