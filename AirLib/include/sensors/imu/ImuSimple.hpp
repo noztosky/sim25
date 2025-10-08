@@ -70,8 +70,9 @@ namespace airlib
             const TTimeDelta elapsed_sec = clock()->elapsedSince(last_log_time_); // seconds
             if (elapsed_sec >= 1.0) {
                 const double hz = static_cast<double>(update_count_) / static_cast<double>(elapsed_sec);
-                Utils::log(Utils::stringf("IMU.update(): %.1f Hz (%u calls), yaw_changed=%u",
-                    hz, static_cast<unsigned>(update_count_), static_cast<unsigned>(yaw_changed_count_)));
+                const double yaw_deg = static_cast<double>(last_yaw_rad_) * 57.29577951308232; // rad -> deg
+                Utils::log(Utils::stringf("IMU.update(): %.1f Hz (%u calls), yaw_changed=%u, yaw=%.1f deg",
+                    hz, static_cast<unsigned>(update_count_), static_cast<unsigned>(yaw_changed_count_), yaw_deg));
                 last_log_time_ = clock()->nowNanos();
                 update_count_ = 0;
                 yaw_changed_count_ = 0;
