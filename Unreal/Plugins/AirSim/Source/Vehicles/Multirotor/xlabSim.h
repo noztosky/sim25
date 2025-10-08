@@ -46,8 +46,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
     void StopCommands();
     UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
-    void StartYawing(float YawRateDegPerSec = 180.0f);
-    UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
     float GetYawDeg() const;
     void Arming();
     static constexpr int32 BuildNumber = 31;
@@ -130,6 +128,8 @@ private:
     std::thread _counterThread;
     std::mutex _counterMutex;
     std::condition_variable _counterCv;
+    std::thread _yawThread;
+    std::atomic<bool> _yawStop{true};
     UPROPERTY()
     USphereComponent* PhysicsAnchor = nullptr;
     UPROPERTY()

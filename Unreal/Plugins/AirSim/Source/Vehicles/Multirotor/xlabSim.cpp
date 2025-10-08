@@ -208,39 +208,36 @@ void AxlabSim::Arming()
 
 void AxlabSim::Takeoff()
 {
-    try {
-        auto* api = ResolveApi(this);
+    Async(EAsyncExecution::ThreadPool, [this]() {
+        // Resolve API on GameThread to be safe
+        msr::airlib::MultirotorApiBase* api = nullptr;
+        FEvent* got = FPlatformProcess::GetSynchEventFromPool(true);
+        AsyncTask(ENamedThreads::GameThread, [this, &api, got]() {
+            api = ResolveApi(this);
+            got->Trigger();
+        });
+        got->Wait();
+        FPlatformProcess::ReturnSynchEventToPool(got);
         if (!api) { __xlog("api null"); return; }
         api->enableApiControl(true);
         api->takeoff(2.0f);
-    } catch (...) {
-        __xlog("api exception in Takeoff");
-    }
+    });
 }
 
 void AxlabSim::Yawing()
 {
-    try {
-        auto* api = ResolveApi(this);
+    Async(EAsyncExecution::ThreadPool, [this]() {
+        msr::airlib::MultirotorApiBase* api = nullptr;
+        FEvent* got = FPlatformProcess::GetSynchEventFromPool(true);
+        AsyncTask(ENamedThreads::GameThread, [this, &api, got]() {
+            api = ResolveApi(this);
+            got->Trigger();
+        });
+        got->Wait();
+        FPlatformProcess::ReturnSynchEventToPool(got);
         if (!api) { __xlog("api null"); return; }
         api->rotateByYawRate(180.0f, 0.2f);
-    } catch (...) {
-        __xlog("api exception");
-    }
-}
-
-void AxlabSim::StartYawing(float YawRateDegPerSec)
-{
-    try {
-        auto* api = ResolveApi(this);
-        if (!api) { __xlog("api null"); return; }
-        _m.controls.isYawing = true;
-        _m.controls.yawRateDegPerSec = YawRateDegPerSec;
-        api->rotateByYawRate(YawRateDegPerSec, 0.2f);
-        __xlogC(FColor::Blue, 2.0f, "StartYawing: %.1f deg/s", YawRateDegPerSec);
-    } catch (...) {
-        __xlog("api exception");
-    }
+    });
 }
 
 float AxlabSim::GetYawDeg() const
