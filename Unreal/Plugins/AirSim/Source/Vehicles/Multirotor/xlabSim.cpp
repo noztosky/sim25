@@ -218,27 +218,31 @@ void AxlabSim::Takeoff()
 
 void AxlabSim::Yawing()
 {
-    try {
-        auto* api = ResolveApi(this);
-        if (!api) { __xlog("api null"); return; }
-        api->rotateByYawRate(180.0f, 0.2f);
-    } catch (...) {
-        __xlog("api exception");
-    }
+    Async(EAsyncExecution::ThreadPool, [this]() {
+        try {
+            auto* api = ResolveApi(this);
+            if (!api) { __xlog("api null"); return; }
+            api->rotateByYawRate(180.0f, 0.2f);
+        } catch (...) {
+            __xlog("api exception");
+        }
+    });
 }
 
 void AxlabSim::StartYawing(float YawRateDegPerSec)
 {
-    try {
-        auto* api = ResolveApi(this);
-        if (!api) { __xlog("api null"); return; }
-        _m.controls.isYawing = true;
-        _m.controls.yawRateDegPerSec = YawRateDegPerSec;
-        api->rotateByYawRate(YawRateDegPerSec, 0.2f);
-        __xlogC(FColor::Blue, 2.0f, "StartYawing: %.1f deg/s", YawRateDegPerSec);
-    } catch (...) {
-        __xlog("api exception");
-    }
+    Async(EAsyncExecution::ThreadPool, [this, YawRateDegPerSec]() {
+        try {
+            auto* api = ResolveApi(this);
+            if (!api) { __xlog("api null"); return; }
+            _m.controls.isYawing = true;
+            _m.controls.yawRateDegPerSec = YawRateDegPerSec;
+            api->rotateByYawRate(YawRateDegPerSec, 0.2f);
+            __xlogC(FColor::Blue, 2.0f, "StartYawing: %.1f deg/s", YawRateDegPerSec);
+        } catch (...) {
+            __xlog("api exception");
+        }
+    });
 }
 
 float AxlabSim::GetYawDeg() const
@@ -325,11 +329,7 @@ void AxlabSim::Tick(float DeltaTime) {
         _m.phase.isCommandIssued = true;
     }
 
-    if (_m.rpc && _m.rpcReady.load() && _m.phase.status == EFlightPhase::Yawing)
-    {
-        const char* name = VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName);
-        _m.rpc->rotateByYawRateAsync(180.0f, DeltaTime, name);
-    }
+    // removed RPC-based continuous yawing during tick to avoid blocking/stalls
     
 }
 
