@@ -141,9 +141,14 @@ void AxlabSim::StartCounterThread()
             {
                 const long long calls = _m.physics.calls.load();
                 const int sim = _m.physics.simulate.load();
-                __xlog("counter=%lld, changed=%d, lastYawDeg=%.1f, physics_calls=%lld bound=%d sim=%d"
+                __xlogC(FColor::Green, 1.5f, "counter=%lld, changed=%d, lastYawDeg=%.1f, physics_calls=%lld bound=%d sim=%d"
                     , _m.counter.value.load(), _m.counter.changed.load(), _m.yaw.lastYawDeg
                     , calls, (int)_m.physics.bound, sim);
+                UAirBlueprintLib::LogMessage(
+                    FString::Printf(TEXT("counter=%lld, changed=%d, lastYawDeg=%.1f, physics_calls=%lld bound=%d sim=%d"),
+                        _m.counter.value.load(), _m.counter.changed.load(), _m.yaw.lastYawDeg,
+                        calls, (int)_m.physics.bound, sim),
+                    TEXT(""), LogDebugLevel::Informational, 1.5f);
                 _m.counter.value.store(0);
                 _m.counter.changed.store(0);
                 do { next_log += std::chrono::seconds(1); } while (now >= next_log);
