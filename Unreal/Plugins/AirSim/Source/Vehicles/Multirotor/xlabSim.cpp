@@ -44,8 +44,14 @@ static msr::airlib::MultirotorApiBase* ResolveApi(const AxlabSim* self)
 {
     ASimModeBase* sim = ASimModeBase::getSimMode();
     if (!sim) return nullptr;
+    auto* provider = sim->getApiProvider();
+    if (!provider) return nullptr;
     const char* name = self->VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*self->VehicleName);
-    return static_cast<msr::airlib::MultirotorApiBase*>(sim->getApiProvider()->getVehicleApi(name));
+    auto* api = static_cast<msr::airlib::MultirotorApiBase*>(provider->getVehicleApi(name));
+    if (!api) {
+        api = static_cast<msr::airlib::MultirotorApiBase*>(provider->getVehicleApi(""));
+    }
+    return api;
 }
 
 void AxlabSim::FindTargetPawn()
@@ -189,60 +195,52 @@ void AxlabSim::StopCounterThread()
 
 void AxlabSim::Arming()
 {
-    Async(EAsyncExecution::ThreadPool, [this]() {
-        try {
-            auto* api = ResolveApi(this);
-            if (!api) { __xlog("api null"); return; }
-            api->enableApiControl(true);
-            bool armed = api->armDisarm(true);
-            __xlog("armed=%d", (int)armed);
-        } catch (...) {
-            __xlog("api exception in Arming");
-        }
-    });
+    try {
+        auto* api = ResolveApi(this);
+        if (!api) { __xlog("api null"); return; }
+        api->enableApiControl(true);
+        bool armed = api->armDisarm(true);
+        __xlog("armed=%d", (int)armed);
+    } catch (...) {
+        __xlog("api exception in Arming");
+    }
 }
 
 void AxlabSim::Takeoff()
 {
-    Async(EAsyncExecution::ThreadPool, [this]() {
-        try {
-            auto* api = ResolveApi(this);
-            if (!api) { __xlog("api null"); return; }
-            api->enableApiControl(true);
-            api->takeoff(2.0f);
-        } catch (...) {
-            __xlog("api exception in Takeoff");
-        }
-    });
+    try {
+        auto* api = ResolveApi(this);
+        if (!api) { __xlog("api null"); return; }
+        api->enableApiControl(true);
+        api->takeoff(2.0f);
+    } catch (...) {
+        __xlog("api exception in Takeoff");
+    }
 }
 
 void AxlabSim::Yawing()
 {
-    Async(EAsyncExecution::ThreadPool, [this]() {
-        try {
-            auto* api = ResolveApi(this);
-            if (!api) { __xlog("api null"); return; }
-            api->rotateByYawRate(180.0f, 0.2f);
-        } catch (...) {
-            __xlog("api exception");
-        }
-    });
+    try {
+        auto* api = ResolveApi(this);
+        if (!api) { __xlog("api null"); return; }
+        api->rotateByYawRate(180.0f, 0.2f);
+    } catch (...) {
+        __xlog("api exception");
+    }
 }
 
 void AxlabSim::StartYawing(float YawRateDegPerSec)
 {
-    Async(EAsyncExecution::ThreadPool, [this, YawRateDegPerSec]() {
-        try {
-            auto* api = ResolveApi(this);
-            if (!api) { __xlog("api null"); return; }
-            _m.controls.isYawing = true;
-            _m.controls.yawRateDegPerSec = YawRateDegPerSec;
-            api->rotateByYawRate(YawRateDegPerSec, 0.2f);
-            __xlogC(FColor::Blue, 2.0f, "StartYawing: %.1f deg/s", YawRateDegPerSec);
-        } catch (...) {
-            __xlog("api exception");
-        }
-    });
+    try {
+        auto* api = ResolveApi(this);
+        if (!api) { __xlog("api null"); return; }
+        _m.controls.isYawing = true;
+        _m.controls.yawRateDegPerSec = YawRateDegPerSec;
+        api->rotateByYawRate(YawRateDegPerSec, 0.2f);
+        __xlogC(FColor::Blue, 2.0f, "StartYawing: %.1f deg/s", YawRateDegPerSec);
+    } catch (...) {
+        __xlog("api exception");
+    }
 }
 
 float AxlabSim::GetYawDeg() const
@@ -257,19 +255,17 @@ float AxlabSim::GetYawDeg() const
 
 void AxlabSim::StopCommands()
 {
-    Async(EAsyncExecution::ThreadPool, [this]() {
-        try {
-            auto* api = ResolveApi(this);
-            if (!api) { __xlog("api null"); return; }
-            api->cancelLastTask();
-            api->hover();
-            _m.phase.status = EFlightPhase::Done;
-            _m.phase.isCommandIssued = true;
-            __xlogC(FColor::Red, 2.0f, "Emergency stop: hover issued");
-        } catch (...) {
-            __xlog("api exception");
-        }
-    });
+    try {
+        auto* api = ResolveApi(this);
+        if (!api) { __xlog("api null"); return; }
+        api->cancelLastTask();
+        api->hover();
+        _m.phase.status = EFlightPhase::Done;
+        _m.phase.isCommandIssued = true;
+        __xlogC(FColor::Red, 2.0f, "Emergency stop: hover issued");
+    } catch (...) {
+        __xlog("api exception");
+    }
 }
 
 void AxlabSim::Tick(float DeltaTime) {
