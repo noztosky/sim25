@@ -4,6 +4,8 @@
 #include "Async/Async.h"
 #include "Misc/DateTime.h"
 #include "vehicles/multirotor/api/MultirotorRpcLibClient.hpp"
+#include "vehicles/multirotor/api/MultirotorApiBase.hpp"
+#include "SimMode/SimModeBase.h"
 #include "common/VectorMath.hpp"
 #include "Components/PrimitiveComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
@@ -35,6 +37,15 @@ void AxlabSim::TryBindPhysicsDelegate()
     _m.physics.bound = true;
     _m.physics.simulate.store(target->BodyInstance.bSimulatePhysics ? 1 : 0);
     __xlog("physics (re)bound: %d simulate=%d on %s", (int)_m.physics.bound, _m.physics.simulate.load(), *target->GetName());
+}
+
+// Resolve in-process Multirotor API (no RPC network)
+static msr::airlib::MultirotorApiBase* ResolveApi(const AxlabSim* self)
+{
+    ASimModeBase* sim = ASimModeBase::getSimMode();
+    if (!sim) return nullptr;
+    const char* name = self->VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*self->VehicleName);
+    return static_cast<msr::airlib::MultirotorApiBase*>(sim->getApiProvider()->getVehicleApi(name));
 }
 
 void AxlabSim::FindTargetPawn()
@@ -178,44 +189,56 @@ void AxlabSim::StopCounterThread()
 
 void AxlabSim::Arming()
 {
-    const char* name = VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName);
-    _m.rpc->enableApiControl(true, name);
-    if (!_m.rpc->isApiControlEnabled(name)) { __xlog("API disabled"); return; }
-        bool armed = _m.rpc->armDisarm(true, name);
+    Async(EAsyncExecution::ThreadPool, [this]() {
+        try {
+            auto* api = ResolveApi(this);
+            if (!api) { __xlog("api null"); return; }
+            api->enableApiControl(true);
+            bool armed = api->armDisarm(true);
+            __xlog("armed=%d", (int)armed);
+        } catch (...) {
+            __xlog("api exception in Arming");
+        }
+    });
 }
 
 void AxlabSim::Takeoff()
 {
-    const char* name = VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName);
-    _m.rpc->enableApiControl(true, name);
-    _m.rpc->takeoffAsync(2.0f, name);
+    Async(EAsyncExecution::ThreadPool, [this]() {
+        try {
+            auto* api = ResolveApi(this);
+            if (!api) { __xlog("api null"); return; }
+            api->enableApiControl(true);
+            api->takeoff(2.0f);
+        } catch (...) {
+            __xlog("api exception in Takeoff");
+        }
+    });
 }
 
 void AxlabSim::Yawing()
 {
-    //Async(EAsyncExecution::ThreadPool, [this]() {
-        try {
-            const char* name = VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName);
-            _m.rpc->rotateByYawRateAsync(180.0f, 0.2f, name);
-        } catch (...) {
-            __xlog("rpc exception");
-        }
-    //});
+    try {
+        auto* api = ResolveApi(this);
+        if (!api) { __xlog("api null"); return; }
+        api->rotateByYawRate(180.0f, 0.2f);
+    } catch (...) {
+        __xlog("api exception");
+    }
 }
 
 void AxlabSim::StartYawing(float YawRateDegPerSec)
 {
-    //Async(EAsyncExecution::ThreadPool, [this, YawRateDegPerSec]() {
-        try {
-            const char* name = VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName);
-            _m.controls.isYawing = true;
-            _m.controls.yawRateDegPerSec = YawRateDegPerSec;
-            _m.rpc->rotateByYawRateAsync(YawRateDegPerSec, 0.2f, name);
-            __xlogC(FColor::Blue, 2.0f, "StartYawing: %.1f deg/s", YawRateDegPerSec);
-        } catch (...) {
-            __xlog("rpc exception");
-        }
-    //});
+    try {
+        auto* api = ResolveApi(this);
+        if (!api) { __xlog("api null"); return; }
+        _m.controls.isYawing = true;
+        _m.controls.yawRateDegPerSec = YawRateDegPerSec;
+        api->rotateByYawRate(YawRateDegPerSec, 0.2f);
+        __xlogC(FColor::Blue, 2.0f, "StartYawing: %.1f deg/s", YawRateDegPerSec);
+    } catch (...) {
+        __xlog("api exception");
+    }
 }
 
 float AxlabSim::GetYawDeg() const
@@ -232,18 +255,15 @@ void AxlabSim::StopCommands()
 {
     Async(EAsyncExecution::ThreadPool, [this]() {
         try {
-            const char* name = VehicleName.IsEmpty() ? "" : TCHAR_TO_ANSI(*VehicleName);
-            // cancel currently running long task on server first
-            _m.rpc->cancelLastTask(name);
-            _m.rpc->waitOnLastTask(nullptr, 1.0f);
-            // then issue a hover to stabilize and zero yaw rate
-            _m.rpc->hoverAsync(name);
-            _m.rpc->waitOnLastTask(nullptr, 1.0f);
+            auto* api = ResolveApi(this);
+            if (!api) { __xlog("api null"); return; }
+            api->cancelLastTask();
+            api->hover();
             _m.phase.status = EFlightPhase::Done;
             _m.phase.isCommandIssued = true;
             __xlogC(FColor::Red, 2.0f, "Emergency stop: hover issued");
         } catch (...) {
-            __xlog("rpc exception");
+            __xlog("api exception");
         }
     });
 }
