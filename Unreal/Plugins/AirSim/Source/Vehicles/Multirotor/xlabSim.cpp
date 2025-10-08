@@ -32,7 +32,6 @@ void AxlabSim::TryBindPhysicsDelegate()
         __xlog("enabling simulate physics on %s", *target->GetName());
         target->SetSimulatePhysics(true);
     }
-    _m.physics.customPhysicsDelegate = FCalculateCustomPhysics::CreateUObject(this, &AxlabSim::OnCalculateCustomPhysics);
     target->BodyInstance.AddCustomPhysics(_m.physics.customPhysicsDelegate);
     _m.physics.bound = true;
     _m.physics.simulate.store(target->BodyInstance.bSimulatePhysics ? 1 : 0);
@@ -145,6 +144,8 @@ void AxlabSim::StartCounterThread()
         auto next_log = clock::now() + std::chrono::seconds(1);
         while (!_m.counter.stop.load())
         {
+            float yawDeg = GetYawDeg();
+            
             {
                 std::unique_lock<std::mutex> lk(_counterMutex);
                 _counterCv.wait_until(lk, next_tick, [this](){ return _m.counter.stop.load(); });
@@ -159,11 +160,11 @@ void AxlabSim::StartCounterThread()
                 const long long calls = _m.physics.calls.load();
                 const int sim = _m.physics.simulate.load();
                 __xlogC(FColor::Green, 1.5f, "counter=%lld, changed=%d, lastYawDeg=%.1f, physics_calls=%lld bound=%d sim=%d"
-                    , _m.counter.value.load(), _m.counter.changed.load(), _m.yaw.lastYawDeg
+                    , _m.counter.value.load(), _m.counter.changed.load(), yawDeg
                     , calls, (int)_m.physics.bound, sim);
                 UAirBlueprintLib::LogMessage(
                     FString::Printf(TEXT("counter=%lld, changed=%d, lastYawDeg=%.1f, physics_calls=%lld bound=%d sim=%d"),
-                        _m.counter.value.load(), _m.counter.changed.load(), _m.yaw.lastYawDeg,
+                        _m.counter.value.load(), _m.counter.changed.load(), yawDeg,
                         calls, (int)_m.physics.bound, sim),
                     TEXT(""), LogDebugLevel::Informational, 1.5f);
                 _m.counter.value.store(0);
@@ -172,7 +173,8 @@ void AxlabSim::StartCounterThread()
             }
 
             
-            float yawDeg = _m.imu.yawDeg;
+            //float yawDeg = _m.imu.yawDeg.load();
+            
             if (_m.yaw.lastYawDeg != yawDeg)
             {
                 _m.counter.changed.fetch_add(1);
@@ -236,14 +238,18 @@ void AxlabSim::Yawing()
         got->Wait();
         FPlatformProcess::ReturnSynchEventToPool(got);
         if (!api) { __xlog("api null"); return; }
-        api->rotateByYawRate(180.0f, 0.2f);
+        api->rotateByYawRate(90.0f, 0.2f);
     });
 }
 
 float AxlabSim::GetYawDeg() const
 {
-    if (_m.imu.valid)
-        return _m.imu.yawDeg;
+    if (_m.imu.valid.load())
+    {
+        std::lock_guard<std::mutex> lk(_imuMutex);
+        const float yaw_from_quat = FMath::UnwindDegrees(_m.imu.orientation.Rotator().Yaw);
+        return yaw_from_quat;
+    }
     const USceneComponent* root = GetRootComponent();
     if (root)
         return FMath::UnwindDegrees(root->GetComponentRotation().Yaw);
@@ -324,39 +330,4 @@ void AxlabSim::Tick(float DeltaTime) {
 
     // removed RPC-based continuous yawing during tick to avoid blocking/stalls
     
-}
-
-void AxlabSim::OnCalculateCustomPhysics(float DeltaTime, FBodyInstance* BodyInstance)
-{
-    if (!BodyInstance)
-        return;
-
-    _m.imu.valid = false;
-    _m.physics.calls.fetch_add(1);
-
-    FTransform transform = BodyInstance->GetUnrealWorldTransform();
-    if (TargetPawn)
-    {
-        transform = TargetPawn->GetActorTransform();
-    }
-    const FVector velocity = BodyInstance->GetUnrealWorldVelocity();
-    const FVector angular = BodyInstance->GetUnrealWorldAngularVelocityInRadians();
-
-    _m.imu.orientation = transform.GetRotation();
-    _m.imu.yawDeg = FMath::UnwindDegrees(_m.imu.orientation.Rotator().Yaw);
-    _m.imu.linearVelocityWS = velocity;
-    if (_m.imu.hasLastVelocity && DeltaTime > KINDA_SMALL_NUMBER)
-    {
-        _m.imu.linearAccelerationWS = (velocity - _m.imu.lastLinearVelocityWS) / DeltaTime;
-    }
-    _m.imu.lastLinearVelocityWS = velocity;
-    _m.imu.hasLastVelocity = true;
-    _m.imu.angularVelocityRad = angular;
-    _m.imu.yawDeg = FMath::UnwindDegrees(_m.imu.orientation.Rotator().Yaw);
-
-    if (UWorld* world = GetWorld())
-    {
-        _m.imu.timestamp = world->GetTimeSeconds();
-    }
-    _m.imu.valid = true;
 }

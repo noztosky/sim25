@@ -111,8 +111,8 @@ private:
             FVector lastLinearVelocityWS = FVector::ZeroVector;
             bool hasLastVelocity = false;
             float timestamp = 0.0f;
-            bool valid = false;
-            float yawDeg = 0.0f;
+            std::atomic<bool> valid{false};
+            std::atomic<float> yawDeg{0.0f};
         }imu;
 
         struct{
@@ -130,6 +130,7 @@ private:
     std::condition_variable _counterCv;
     std::thread _yawThread;
     std::atomic<bool> _yawStop{true};
+    mutable std::mutex _imuMutex;
     UPROPERTY()
     USphereComponent* PhysicsAnchor = nullptr;
     UPROPERTY()
@@ -139,7 +140,6 @@ private:
     void StartCounterThread();
     void StopCounterThread();
     void UpdateImuFromPhysics(float DeltaTime);
-    void OnCalculateCustomPhysics(float DeltaTime, struct FBodyInstance* BodyInstance);
     void TryBindPhysicsDelegate();
     void FindTargetPawn();
     UPrimitiveComponent* FindSimulatingPrimitive(AActor* Actor) const;
