@@ -2,11 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include <thread>
 #include <atomic>
-#include <mutex>
-#include <condition_variable>
-#include "PhysicsEngine/BodyInstance.h"
 #include "xlabSim.generated.h"
 namespace msr { namespace airlib { class MultirotorRpcLibClient; } }
 class USphereComponent;
@@ -40,13 +36,10 @@ protected:
 public:
     virtual void Tick(float DeltaTime) override;
 
-    void loop();
     void Takeoff();
     void Yawing();
     UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
     void StopCommands();
-    UFUNCTION(BlueprintCallable, Category = "xlabSim Controls")
-    float GetYawDeg() const;
     void Arming();
     static constexpr int32 BuildNumber = 31;
 
@@ -69,81 +62,15 @@ private:
     };
 
     struct{
-        msr::airlib::MultirotorRpcLibClient* rpc = nullptr;
-            std::atomic<bool> rpcReady{false};
-
         struct{
             EFlightPhase status = EFlightPhase::None;
             bool isCommandIssued = false;
-        }phase;        
-
+        }phase;
         struct{
             float lastTime = 0.0f;
             float nextSecs = 0.0f;
         }time;
-
         float startTime = 0.0f;
-
-        struct{
-            bool isYawing = false;
-            float yawRateDegPerSec = 0.0f;
-            float holdZ = 0.0f;
-        }controls;
-        
-        struct{
-            float lastLogTime = 0.0f;
-            float intervalSecs = 1.0f;
-            float lastYawDeg = 0.0f;
-        }yaw;
-        
-        struct{
-            std::atomic<bool> stop{false};
-            std::atomic<long long> value{0};
-            float accum = 0.0f;
-            std::atomic<long long>  changed = 0;
-        }counter;
-
-        struct{
-            FVector linearVelocityWS = FVector::ZeroVector;
-            FVector linearAccelerationWS = FVector::ZeroVector;
-            FVector angularVelocityRad = FVector::ZeroVector;
-            FQuat orientation = FQuat::Identity;
-            FVector lastLinearVelocityWS = FVector::ZeroVector;
-            bool hasLastVelocity = false;
-            float timestamp = 0.0f;
-            std::atomic<bool> valid{false};
-            std::atomic<float> yawDeg{0.0f};
-        }imu;
-
-        struct{
-            FCalculateCustomPhysics customPhysicsDelegate;
-            class UPrimitiveComponent* component = nullptr;
-            std::atomic<long long> calls{0};
-            bool bound = false;
-            long long lastCallsSnapshot = 0;
-            std::atomic<int> simulate{0};
-        }physics;
     }_m;
-    
-    std::thread _counterThread;
-    std::mutex _counterMutex;
-    std::condition_variable _counterCv;
-    std::thread _yawThread;
-    std::atomic<bool> _yawStop{true};
-    mutable std::mutex _imuMutex;
-    UPROPERTY()
-    USphereComponent* PhysicsAnchor = nullptr;
-    UPROPERTY()
-    USceneComponent* SceneRoot = nullptr;
 
-private:
-    void StartCounterThread();
-    void StopCounterThread();
-    void UpdateImuFromPhysics(float DeltaTime);
-    void TryBindPhysicsDelegate();
-    void FindTargetPawn();
-    UPrimitiveComponent* FindSimulatingPrimitive(AActor* Actor) const;
-
-    UPROPERTY()
-    APawn* TargetPawn = nullptr;
 };
