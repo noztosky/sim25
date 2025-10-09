@@ -6,7 +6,7 @@
 #include <chrono>
 #include <thread>
 #include <cmath>
-#include "fc_memory.h"
+#include "fc_ring.h"
 
 namespace {
 static const int IMU_TARGET_HZ = 1000; // 1000Hz 테스트
@@ -18,7 +18,7 @@ static const int BARO_TARGET_HZ = 100;
 
 class AirSimServer {
 private:
-    fc_memory fc_;
+    fc_ring fc_;
     bool is_running_;
     int imu_count_;
     int pwm_count_;
@@ -27,10 +27,12 @@ private:
     std::chrono::high_resolution_clock::time_point start_time_;
     // angle state updated every 1s
     double roll_deg_{0.0}, pitch_deg_{0.0}, yaw_deg_{0.0};
-    std::chrono::high_resolution_clock::time_point last_angle_update_;
     // last received PWM snapshot
     PWMData last_pwm_{};
     bool last_pwm_valid_{false};
+    // dedicated IMU pacing thread
+    std::thread imu_thread_;
+    const std::chrono::microseconds imu_interval_{ std::chrono::microseconds(1000000 / IMU_TARGET_HZ) };
 
 public:
     AirSimServer() : is_running_(false), imu_count_(0), pwm_count_(0), baro_count_(0), metrics_started_(false) {}
@@ -55,13 +57,15 @@ public:
         is_running_ = true;
         start_time_ = std::chrono::high_resolution_clock::now();
         metrics_started_ = true; // Shared memory is always ready
-        last_angle_update_ = start_time_;
+        // start dedicated IMU pacing thread
+        imu_thread_ = std::thread([this]() { this->imu_loop(); });
         
         return true;
     }
 
     void stop() {
         is_running_ = false;
+        if (imu_thread_.joinable()) imu_thread_.join();
         cleanup();
         timeEndPeriod(1);
         std::cout << "AirSim Server stopped." << std::endl;
@@ -78,9 +82,7 @@ public:
         auto last_print_time = std::chrono::high_resolution_clock::now();
         int print_count = 0;
 
-        // Publish intervals (workers handle actual I/O)
-        const auto imu_interval = std::chrono::microseconds(1000000 / IMU_TARGET_HZ);
-        auto next_imu_time = start_time_ + imu_interval;
+        // Publish intervals (IMU handled on dedicated thread)
         const auto pwm_poll_interval = std::chrono::microseconds(1000000 / PWM_TARGET_HZ);
         auto next_pwm_poll_time = start_time_;
         const auto baro_interval = std::chrono::microseconds(1000000 / BARO_TARGET_HZ);
@@ -92,35 +94,7 @@ public:
         while (is_running_) {
             auto now = std::chrono::high_resolution_clock::now();
             
-            // IMU publish with catch-up scheduler
-            {
-                int safety = 0;
-                while (now >= next_imu_time && safety < 5) {
-                    double dt = std::chrono::duration<double>(now - last_angle_update_).count();
-                    if (dt < 0.0) dt = 0.0;
-                    if (dt > 0.05) dt = 0.05; // avoid huge steps when paused
-
-                    // simple test increments
-                    roll_deg_  += 0.01;
-                    pitch_deg_ += 0.001;
-                    yaw_deg_   += 0.0001;
-                    if (roll_deg_  >= 360.0) roll_deg_  -= 360.0;
-                    if (pitch_deg_ >= 360.0) pitch_deg_ -= 360.0;
-                    if (yaw_deg_   >= 360.0) yaw_deg_   -= 360.0;
-                    last_angle_update_ = now;
-
-                    ImuData imu_data = generateImuData();
-                    fc_.publish_imu(imu_data);
-                    imu_count_++;
-
-                    next_imu_time += imu_interval;
-                    safety++;
-                }
-                // if we fell too far behind, re-sync to avoid long catch-up burst
-                if (safety == 5 && now > next_imu_time + 10 * imu_interval) {
-                    next_imu_time = now + imu_interval;
-                }
-            }
+            // IMU publish handled on dedicated thread
 
             // PWM 데이터 수신 폴링 (Shared Memory에서 직접 읽기)
             if (now >= next_pwm_poll_time) {
@@ -163,9 +137,8 @@ public:
             }
 
             // 안전한 타이밍 제어
-            auto next_time = next_imu_time;
+            auto next_time = next_baro_time;
             if (next_pwm_poll_time < next_time) next_time = next_pwm_poll_time;
-            if (next_baro_time < next_time) next_time = next_baro_time;
             auto current_time = std::chrono::high_resolution_clock::now();
             
             if (current_time < next_time) {
@@ -199,7 +172,7 @@ private:
         if (now >= next_baro_time) {
             auto tp = std::chrono::high_resolution_clock::now();
             auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(tp.time_since_epoch()).count();
-            BaroData b = fc_memory::make_fixed_baro(ns, baro_count_);
+            BaroData b = fc_ring::make_fixed_baro(ns, baro_count_);
             fc_.publish_baro(b);
             baro_count_++;
             next_baro_time += baro_interval;
@@ -234,6 +207,26 @@ private:
             // 요 왼쪽
         }
         */
+    }
+    void imu_loop() {
+        // uniform pacing using cumulative schedule + skip-late resync
+        auto next_tp = std::chrono::high_resolution_clock::now() + imu_interval_;
+        while (is_running_) {
+            std::this_thread::sleep_until(next_tp);
+            next_tp += imu_interval_;
+
+            // simple test increments
+            roll_deg_  += 0.01;
+            pitch_deg_ += 0.001;
+            yaw_deg_   += 0.0001;
+            if (roll_deg_  >= 360.0) roll_deg_  -= 360.0;
+            if (pitch_deg_ >= 360.0) pitch_deg_ -= 360.0;
+            if (yaw_deg_   >= 360.0) yaw_deg_   -= 360.0;
+
+            ImuData imu_data = generateImuData();
+            fc_.publish_imu(imu_data);
+            imu_count_++;
+        }
     }
 };
 

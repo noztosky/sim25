@@ -1,3 +1,7 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <iostream>
 #include <iomanip>
@@ -5,7 +9,7 @@
 #include <thread>
 #include <atomic>
 #include <cmath>
-#include "fc_memory.h"
+#include "fc_ring.h"
 
 namespace {
 static const int IMU_TARGET_HZ = 1000; // 100MHz 테스트
@@ -17,7 +21,7 @@ static const int BARO_TARGET_HZ = 100;
 
 class AirSimClient {
 private:
-    fc_memory fc_;
+    fc_ring fc_;
     bool is_connected_;
     int imu_count_;
     int pwm_count_;
@@ -100,7 +104,7 @@ public:
         auto now = std::chrono::high_resolution_clock::now();
         auto duration = now.time_since_epoch();
         auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
-        return fc_memory::make_fixed_pwm(nanoseconds, pwm_count_);
+        return fc_ring::make_fixed_pwm(nanoseconds, pwm_count_);
     }
 
     
@@ -114,15 +118,15 @@ public:
         auto last_print_time = start_time;
         int print_count = 0;
 
-        const auto pwm_interval = std::chrono::microseconds(1000000 / PWM_TARGET_HZ);
-        auto next_pwm_time = start_time;
+        const auto pwm_interval = std::chrono::microseconds(1000000 / PWM_TARGET_HZ); // 400 Hz => 2500 us
+        auto next_pwm_time = start_time + pwm_interval;
         auto last_pwm_bump = start_time;
         int base_pwm = 1000;
 
         while (is_connected_) {
             auto now = std::chrono::high_resolution_clock::now();
             
-            // PWM 데이터 전송 (400Hz) - Shared Memory 직접 쓰기
+            // PWM 데이터 전송 (400Hz) - uniform pacing with sleep_until
             if (now >= next_pwm_time) {
                 PWMData pwm_data = generatePWMData();
                 if (std::chrono::duration_cast<std::chrono::seconds>(now - last_pwm_bump).count() >= 1) {
@@ -149,15 +153,21 @@ public:
                 last_pwm_r1_ = r1; last_pwm_r2_ = r2; last_pwm_r3_ = r3; last_pwm_r4_ = r4;
                 pwm_count_++;
                 pwm_tx_count_.fetch_add(1, std::memory_order_relaxed);
+                // cumulative advance; skip-late without burst
                 next_pwm_time += pwm_interval;
+                while (next_pwm_time + pwm_interval < now) next_pwm_time += pwm_interval;
             }
 
-            // 1초마다 상태 출력
+            // 1초 주기 정밀 계산(정확한 dt로 정규화)
             if (std::chrono::duration_cast<std::chrono::seconds>(now - last_print_time).count() >= 1) {
                 print_count++;
-                int imu_frequency = imu_changed_count_.exchange(0);
-                int baro_frequency = baro_changed_count_.exchange(0);
-                int pwm_frequency = pwm_tx_count_.exchange(0);
+                double dt_sec = std::chrono::duration<double>(now - last_print_time).count();
+                int imu_samples = imu_changed_count_.exchange(0);
+                int baro_samples = baro_changed_count_.exchange(0);
+                int pwm_samples = pwm_tx_count_.exchange(0);
+                double imu_frequency = dt_sec > 0 ? imu_samples / dt_sec : 0.0;
+                double baro_frequency = dt_sec > 0 ? baro_samples / dt_sec : 0.0;
+                double pwm_frequency = dt_sec > 0 ? pwm_samples / dt_sec : 0.0;
                 
                 auto norm360 = [](double a){ while (a < 0) a += 360.0; while (a >= 360.0) a -= 360.0; return a; };
                 int r = static_cast<int>(std::lround(norm360(last_roll_)));
@@ -174,16 +184,10 @@ public:
                 last_print_time = now;
             }
 
-            // 안전한 타이밍 제어
-            auto next_time = next_pwm_time;
-            auto current_time = std::chrono::high_resolution_clock::now();
-            
-            if (current_time < next_time) {
-                auto sleep_duration = next_time - current_time;
-                if (sleep_duration > std::chrono::microseconds(0)) {
-                    std::this_thread::sleep_for(sleep_duration);
-                }
-            }
+            // 다음 이벤트까지 정확 대기 (min without macro issues)
+            auto print_deadline = last_print_time + std::chrono::seconds(1);
+            auto next_time = (next_pwm_time < print_deadline) ? next_pwm_time : print_deadline;
+            std::this_thread::sleep_until(next_time);
         }
     }
 private:

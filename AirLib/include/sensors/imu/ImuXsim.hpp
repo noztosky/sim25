@@ -59,11 +59,10 @@ public:
 
         updateOutput();
 
-        // write to x_memory at ~1 kHz (Euler-based) using catch-up scheduler to avoid drift/under-rate
+        // write to x_memory at ~1 kHz (uniform pacing, skip-late: no burst catch-up)
         if (xmem_inited_ && target_hz_ > 0) {
             const TTimePoint now_ns = clock()->nowNanos();
-            int safety = 0;
-            while ((static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) && safety < 5) {
+            if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
                 const auto& out = getOutput();
                 real_T pr = 0, rr = 0, yr = 0;
                 VectorMath::toEulerianAngle(out.orientation, pr, rr, yr);
@@ -75,8 +74,8 @@ public:
                 int seq_counter = static_cast<int>(++imu_seq_);
                 xmem_writer_.writeImuEuler(rr_deg, pr_deg, yr_deg, ts_ns, seq_counter);
 
-                next_write_tp_ns_ += period_ns_;
-                ++safety;
+                // reschedule uniformly: next tick from 'now'
+                next_write_tp_ns_ = now_ns + period_ns_;
             }
         }
 
