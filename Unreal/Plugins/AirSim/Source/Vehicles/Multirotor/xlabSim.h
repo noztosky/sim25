@@ -4,7 +4,7 @@
 #include "GameFramework/Actor.h"
 #include <atomic>
 #include "xlabSim.generated.h"
-namespace msr { namespace airlib { class MultirotorRpcLibClient; } }
+namespace msr { namespace airlib { class MultirotorRpcLibClient; class XlabXMemoryReader; } }
 class USphereComponent;
 class USceneComponent;
 class APawn;
@@ -72,5 +72,8 @@ private:
         }time;
         float startTime = 0.0f;
     }_m;
+
+    // external PWM reader
+    msr::airlib::XlabXMemoryReader* _pwmReaderPtr = nullptr; // fwd-decl safe ptr if needed
 
 };
