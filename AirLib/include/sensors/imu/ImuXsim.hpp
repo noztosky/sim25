@@ -59,7 +59,7 @@ public:
 
         updateOutput();
 
-        // write to x_memory at ~1 kHz (uniform pacing, skip-late: no burst catch-up)
+        // write to x_memory at ~1 kHz (uniform pacing with cumulative schedule + skip-late)
         if (xmem_inited_ && target_hz_ > 0) {
             const TTimePoint now_ns = clock()->nowNanos();
             if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
@@ -74,8 +74,16 @@ public:
                 int seq_counter = static_cast<int>(++imu_seq_);
                 xmem_writer_.writeImuEuler(rr_deg, pr_deg, yr_deg, ts_ns, seq_counter);
 
-                // reschedule uniformly: next tick from 'now'
-                next_write_tp_ns_ = now_ns + period_ns_;
+                // cumulative advance to keep average exactly 1 kHz
+                next_write_tp_ns_ += period_ns_;
+                // if slightly behind, skip-late without burst (advance schedule only)
+                while (static_cast<long long>((next_write_tp_ns_ + period_ns_) - now_ns) < 0) {
+                    next_write_tp_ns_ += period_ns_;
+                }
+                // if far behind, resync to avoid long drift
+                if (static_cast<long long>(now_ns - next_write_tp_ns_) > static_cast<long long>(2 * period_ns_)) {
+                    next_write_tp_ns_ = now_ns + period_ns_;
+                }
             }
         }
 
