@@ -71,4 +71,5 @@ private:
     To increase freq with limited CPU power, switch Barometer to constant ref mode.
     */
     long long physics_loop_period_ = 1000000LL; //1ms
+    // noztosky 2025-10-09 3ms -> 1ms
 };

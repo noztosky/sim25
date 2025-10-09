@@ -7,7 +7,7 @@
 #include "common/Common.hpp"
 #include "ImuSimpleParams.hpp"
 #include "ImuBase.hpp"
-#include "common/VectorMath.hpp"
+
 
 namespace msr
 {
@@ -37,46 +37,12 @@ namespace airlib
             state_.accelerometer_bias = params_.accel.turn_on_bias;
             gauss_dist.reset();
             updateOutput();
-
-            // init frequency logging
-            last_log_time_ = clock()->nowNanos();
-            update_count_ = 0;
-
-            // init yaw change tracking
-            const GroundTruth& ground_truth = getGroundTruth();
-            real_T pitch_r = 0, roll_r = 0, yaw_r = 0;
-            VectorMath::toEulerianAngle(ground_truth.kinematics->pose.orientation, pitch_r, roll_r, yaw_r);
-            last_yaw_rad_ = yaw_r;
-            yaw_changed_count_ = 0;
         }
 
         virtual void update() override
         {
             ImuBase::update();
-
-            // track yaw changes before/after output update using current ground truth
-            const GroundTruth& ground_truth = getGroundTruth();
-            real_T pitch_r = 0, roll_r = 0, yaw_r = 0;
-            VectorMath::toEulerianAngle(ground_truth.kinematics->pose.orientation, pitch_r, roll_r, yaw_r);
-            if (std::abs(yaw_r - last_yaw_rad_) > static_cast<real_T>(1e-6)) {
-                ++yaw_changed_count_;
-                last_yaw_rad_ = yaw_r;
-            }
-
             updateOutput();
-
-            // frequency logging: print once per ~1s window
-            ++update_count_;
-            const TTimeDelta elapsed_sec = clock()->elapsedSince(last_log_time_); // seconds
-            if (elapsed_sec >= 1.0) {
-                const double hz = static_cast<double>(update_count_) / static_cast<double>(elapsed_sec);
-                const double yaw_deg = static_cast<double>(last_yaw_rad_) * 57.29577951308232; // rad -> deg
-                Utils::log(Utils::stringf("IMU.update(): %.1f Hz (%u calls), yaw_changed=%u, yaw=%.1f deg",
-                    hz, static_cast<unsigned>(update_count_), static_cast<unsigned>(yaw_changed_count_), yaw_deg));
-                last_log_time_ = clock()->nowNanos();
-                update_count_ = 0;
-                yaw_changed_count_ = 0;
-            }
         }
         //*** End: UpdatableState implementation ***//
 
@@ -146,11 +112,6 @@ namespace airlib
         } state_;
 
         TTimePoint last_time_;
-        // logging counters
-        TTimePoint last_log_time_ = 0;
-        uint32_t update_count_ = 0;
-        uint32_t yaw_changed_count_ = 0;
-        real_T last_yaw_rad_ = 0;
     };
 }
 } //namespace

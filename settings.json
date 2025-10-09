@@ -13,6 +13,13 @@
       "RC": {
         "RemoteControlID": 0,
         "AllowAPIWhenDisconnected": false
+      },
+      "Sensors": {
+        "Imu": {
+          "SensorType": 2,
+          "Enabled": true,
+          "Model": "Xsim"
+        }
       }
     }
   },

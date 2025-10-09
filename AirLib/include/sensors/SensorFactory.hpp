@@ -7,6 +7,7 @@
 
 //sensors
 #include "sensors/imu/ImuSimple.hpp"
+#include "sensors/imu/ImuXsim.hpp"
 #include "sensors/magnetometer/MagnetometerSimple.hpp"
 #include "sensors/gps/GpsSimple.hpp"
 #include "sensors/barometer/BarometerSimple.hpp"
@@ -25,7 +26,15 @@ namespace airlib
         {
             switch (sensor_setting->sensor_type) {
             case SensorBase::SensorType::Imu:
-                return std::shared_ptr<ImuSimple>(new ImuSimple(*static_cast<const AirSimSettings::ImuSetting*>(sensor_setting)));
+            {
+                // Select ImuXsim when settings include Model=="Xsim"
+                const auto* imu_setting = static_cast<const AirSimSettings::ImuSetting*>(sensor_setting);
+                const Settings& s = imu_setting->settings;
+                std::string model = s.getString("Model", "");
+                if (model == "Xsim")
+                    return std::shared_ptr<ImuXsim>(new ImuXsim(*imu_setting));
+                return std::shared_ptr<ImuSimple>(new ImuSimple(*imu_setting));
+            }
             case SensorBase::SensorType::Magnetometer:
                 return std::shared_ptr<MagnetometerSimple>(new MagnetometerSimple(*static_cast<const AirSimSettings::MagnetometerSetting*>(sensor_setting)));
             case SensorBase::SensorType::Gps:
