@@ -173,12 +173,14 @@ public:
                 int r = static_cast<int>(std::lround(norm360(last_roll_)));
                 int p = static_cast<int>(std::lround(norm360(last_pitch_)));
                 int y = static_cast<int>(std::lround(norm360(last_yaw_)));
+                double baro_m = static_cast<double>(last_baro_cm_) / 100.0;
                 std::cout << "[" << print_count << "s] IMU: " << std::fixed << std::setprecision(0) << imu_frequency
                           << " Hz (" << std::setw(3) << std::setfill('0') << r << " "
                           << std::setw(3) << std::setfill('0') << p << " "
                           << std::setw(3) << std::setfill('0') << y << "), BARO: "
                           << std::fixed << std::setprecision(0) << baro_frequency
-                          << " Hz, PWM: " << std::fixed << std::setprecision(0) << pwm_frequency
+                          << " Hz alt: " << std::fixed << std::setprecision(2) << baro_m << " m, PWM: "
+                          << std::fixed << std::setprecision(0) << pwm_frequency
                           << " Hz (" << last_pwm_r1_ << " " << last_pwm_r2_ << " " << last_pwm_r3_ << " " << last_pwm_r4_ << ")" << std::endl;
                 
                 last_print_time = now;

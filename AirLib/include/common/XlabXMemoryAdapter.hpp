@@ -40,6 +40,13 @@ public:
         return writeImuEulerInternal(roll, pitch, yaw, timestamp_ns, frequency);
     }
 
+    bool writeBaro(double altitude_m, long long timestamp_ns, int frequency)
+    {
+        if (!ready_)
+            return false;
+        return writeBaroInternal(altitude_m, timestamp_ns, frequency);
+    }
+
 private:
     bool openInternal(const std::string& path)
     {
@@ -73,6 +80,17 @@ private:
         return true;
 #else
         unused(roll); unused(pitch); unused(yaw); unused(timestamp_ns); unused(frequency);
+        return false;
+#endif
+    }
+
+    bool writeBaroInternal(double altitude_m, long long timestamp_ns, int frequency)
+    {
+#if defined(XLAB_XMEMORY_WRITE_BARO)
+        XLAB_XMEMORY_WRITE_BARO(impl_, altitude_m, timestamp_ns, frequency);
+        return true;
+#else
+        unused(altitude_m); unused(timestamp_ns); unused(frequency);
         return false;
 #endif
     }

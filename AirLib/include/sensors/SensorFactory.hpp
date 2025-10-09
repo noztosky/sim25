@@ -11,6 +11,7 @@
 #include "sensors/magnetometer/MagnetometerSimple.hpp"
 #include "sensors/gps/GpsSimple.hpp"
 #include "sensors/barometer/BarometerSimple.hpp"
+#include "sensors/barometer/BaroXsim.hpp"
 
 namespace msr
 {
@@ -35,12 +36,19 @@ namespace airlib
                     return std::shared_ptr<ImuXsim>(new ImuXsim(*imu_setting));
                 return std::shared_ptr<ImuSimple>(new ImuSimple(*imu_setting));
             }
+            case SensorBase::SensorType::Barometer:
+            {
+                const auto* baro_setting = static_cast<const AirSimSettings::BarometerSetting*>(sensor_setting);
+                const Settings& s = baro_setting->settings;
+                std::string model = s.getString("Model", "");
+                if (model == "Xsim")
+                    return std::shared_ptr<BaroXsim>(new BaroXsim(*baro_setting));
+                return std::shared_ptr<BarometerSimple>(new BarometerSimple(*baro_setting));
+            }
             case SensorBase::SensorType::Magnetometer:
                 return std::shared_ptr<MagnetometerSimple>(new MagnetometerSimple(*static_cast<const AirSimSettings::MagnetometerSetting*>(sensor_setting)));
             case SensorBase::SensorType::Gps:
                 return std::shared_ptr<GpsSimple>(new GpsSimple(*static_cast<const AirSimSettings::GpsSetting*>(sensor_setting)));
-            case SensorBase::SensorType::Barometer:
-                return std::shared_ptr<BarometerSimple>(new BarometerSimple(*static_cast<const AirSimSettings::BarometerSetting*>(sensor_setting)));
             default:
                 throw new std::invalid_argument("Unexpected sensor type");
             }

@@ -22,4 +22,11 @@
 // PWM read mapping (single-slot compatibility API provided by fc_ring)
 #define XLAB_XMEMORY_TRY_GET_PWM(impl, out_pwm_struct)   (impl.try_get_pwm(out_pwm_struct))
 
+// Baro write mapping (altitude in meters)
+#define XLAB_XMEMORY_WRITE_BARO(impl, altitude_m, ts_ns, hz) do { \
+    BaroData b{}; \
+    b.altitude = (altitude_m); b.timestamp = (ts_ns); b.frequency = (hz); b.is_valid = true; \
+    impl.publish_baro(b); \
+} while(0)
+
 

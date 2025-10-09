@@ -19,6 +19,12 @@
           "SensorType": 2,
           "Enabled": true,
           "Model": "Xsim"
+        },
+        "Barometer": {
+          "SensorType": 1,
+          "Enabled": true,
+          "Model": "Xsim",
+          "UpdateFrequency": 100
         }
       }
     }
