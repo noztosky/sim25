@@ -5,6 +5,8 @@
 #include "ImuBase.hpp"
 #include "common/VectorMath.hpp"
 #include "common/XlabUeMetrics.hpp"
+// use new x_xsim shared memory for composite telemetry
+#include "D:\\open\\airsim\\x_memory\\x_xsim.h"
 #include "common/XlabXMemoryAdapter.hpp"
 
 namespace msr
@@ -37,11 +39,12 @@ public:
         updateOutput();
 
         if (!xmem_inited_) {
-            const std::string default_path = std::string("AirSimSharedMemory");
-            xmem_writer_.initialize(default_path);
+            // init 1kHz pacing and x_xsim server mapping
             target_hz_ = 1000.0f;
             period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(target_hz_));
             next_write_tp_ns_ = clock()->nowNanos() + period_ns_;
+            if (!xsim_) xsim_.reset(new x_xsim());
+            xsim_->server_create("AirSimXsim");
             xmem_inited_ = true;
         }
     }
@@ -60,20 +63,39 @@ public:
 
         updateOutput();
 
-        // write to x_memory at ~1 kHz (uniform pacing with cumulative schedule + skip-late)
+        // publish to x_xsim at ~1 kHz (uniform pacing with cumulative schedule + skip-late)
         if (xmem_inited_ && target_hz_ > 0) {
             const TTimePoint now_ns = clock()->nowNanos();
             if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
                 const auto& out = getOutput();
-                real_T pr = 0, rr = 0, yr = 0;
-                VectorMath::toEulerianAngle(out.orientation, pr, rr, yr);
-                const double rad2deg = 57.29577951308232;
-                double rr_deg = static_cast<double>(rr) * rad2deg;
-                double pr_deg = static_cast<double>(pr) * rad2deg;
-                double yr_deg = static_cast<double>(yr) * rad2deg;
+                const GroundTruth& gt = getGroundTruth();
                 long long ts_ns = static_cast<long long>(out.time_stamp * 1e9);
                 int seq_counter = static_cast<int>(++imu_seq_);
-                xmem_writer_.writeImuEuler(rr_deg, pr_deg, yr_deg, ts_ns, seq_counter);
+                // fill telemetry
+                XSimTelemetry d{};
+                d.gyro[0] = static_cast<double>(gt.kinematics->twist.angular.x());
+                d.gyro[1] = static_cast<double>(gt.kinematics->twist.angular.y());
+                d.gyro[2] = static_cast<double>(gt.kinematics->twist.angular.z());
+                // acc body (already computed in output)
+                d.acc[0] = static_cast<double>(out.linear_acceleration.x());
+                d.acc[1] = static_cast<double>(out.linear_acceleration.y());
+                d.acc[2] = static_cast<double>(out.linear_acceleration.z());
+                // quat wxyz (float)
+                const auto& q = gt.kinematics->pose.orientation;
+                d.quat[0] = q.w(); d.quat[1] = q.x(); d.quat[2] = q.y(); d.quat[3] = q.z();
+                // position NED
+                const auto& p = gt.kinematics->pose.position;
+                d.loc_ned[0] = static_cast<double>(p.x());
+                d.loc_ned[1] = static_cast<double>(p.y());
+                d.loc_ned[2] = static_cast<double>(p.z());
+                d.alt = -static_cast<double>(p.z());
+                // mag not available here -> zero
+                d.mag[0] = 0.0; d.mag[1] = 0.0; d.mag[2] = 0.0;
+                d.timestamp = ts_ns;
+                d.seq = seq_counter;
+                d.is_valid = true;
+                std::memset(d.padding, 0, sizeof d.padding);
+                if (xsim_) xsim_->publish_telem(d);
 
                 // cumulative advance to keep average exactly 1 kHz
                 next_write_tp_ns_ += period_ns_;
@@ -128,7 +150,7 @@ private:
     uint32_t yaw_changed_count_ = 0;
     real_T last_yaw_rad_ = 0;
 
-    XlabXMemoryWriter xmem_writer_;
+    std::unique_ptr<x_xsim> xsim_;
     bool xmem_inited_ = false;
     float target_hz_ = 1000.0f;
     // scheduling for consistent rate

@@ -17,11 +17,11 @@
 #include "AirSimSimpleFlightCommon.hpp"
 #include "physics/PhysicsBody.hpp"
 #include "common/AirSimSettings.hpp"
-#include "common/XlabXMemoryAdapter.hpp"
 #include "common/XlabUeMetrics.hpp"
+// switch to x_xsim for PWM/telemetry
+#include "D:\\open\\airsim\\x_memory\\x_xsim.h"
 
 //TODO: we need to protect contention between physics thread and API server thread
-
 namespace msr
 {
 namespace airlib
@@ -62,11 +62,10 @@ namespace airlib
             //update controller which will update actuator control signal
             firmware_->update();
 
-            // External PWM passthrough (read from shared memory ring and apply to motors)
+            // External PWM passthrough via x_xsim
             if (!pwm_reader_inited_) {
-                pwm_reader_.reset(new XlabXMemoryReader());
-                // Must match the mapping name used by writers (e.g., ImuXsim / server)
-                pwm_reader_->initialize(std::string("AirSimSharedMemory"));
+                if (!xsim_) xsim_.reset(new x_xsim());
+                xsim_->client_connect("AirSimXsim");
                 pwm_reader_inited_ = true;
                 last_log_tp_ = std::chrono::steady_clock::now();
                 pwm_read_count_sec_ = 0;
@@ -74,39 +73,54 @@ namespace airlib
                 if (!isApiControlEnabled()) enableApiControl(true);
                 armDisarm(true);
             }
-            if (pwm_reader_) {
-                float pwm[8] = {};
-                int count = 0;
-                if (pwm_reader_->read(pwm, 8, &count) && count >= 4) {
+            if (xsim_) {
+                static uint32_t last_pwm_seq = 0;
+                static uint32_t last_telem_seq = 0;
+                XSimPwm in{};
+                if (xsim_->try_get_pwm(last_pwm_seq, in)) {
+                    last_pwm_r_[0] = in.rotor1; last_pwm_r_[1] = in.rotor2; last_pwm_r_[2] = in.rotor3; last_pwm_r_[3] = in.rotor4;
                     auto to_unit = [](float us) {
                         float v = (us - 1000.0f) / 1000.0f;
                         if (v < 0.0f) v = 0.0f;
                         if (v > 1.0f) v = 1.0f;
                         return v;
                     };
-                    float u0 = to_unit(pwm[0]);
-                    float u1 = to_unit(pwm[1]);
-                    float u2 = to_unit(pwm[2]);
-                    float u3 = to_unit(pwm[3]);
+                    float u0 = to_unit(static_cast<float>(in.rotor1));
+                    float u1 = to_unit(static_cast<float>(in.rotor2));
+                    float u2 = to_unit(static_cast<float>(in.rotor3));
+                    float u3 = to_unit(static_cast<float>(in.rotor4));
                     // Apply immediately in passthrough mode
                     commandMotorPWMs(u0, u1, u2, u3);
-
-                    // count successful dequeues and print once per second based on actual dt
                     pwm_read_count_sec_++;
-                    auto now = std::chrono::steady_clock::now();
-                    auto dt_sec = std::chrono::duration<double>(now - last_log_tp_).count();
-                    if (dt_sec >= 1.0) {
-                        int r1 = static_cast<int>(pwm[0]);
-                        int r2 = static_cast<int>(pwm[1]);
-                        int r3 = static_cast<int>(pwm[2]);
-                        int r4 = static_cast<int>(pwm[3]);
-                        int hz = dt_sec > 0.0 ? static_cast<int>(std::lround(pwm_read_count_sec_ / dt_sec)) : 0;
-                        int imu_hz = XlabUeMetrics::getImuHz();
-                        // single-line combined log: pwm + imu
-                        Utils::log(Utils::stringf("pwm %d %d %d %d (%dhz), imu(%dhz)", r1, r2, r3, r4, hz, imu_hz));
-                        last_log_tp_ = now;
-                        pwm_read_count_sec_ = 0;
-                    }
+                }
+                // consume latest telemetry to populate values
+                xsim_->consume_telem(last_telem_seq, [this](const XSimTelemetry& d){ last_telem_ = d; have_telem_ = true; });
+                // 1-second combined log (even if no new PWM in this tick)
+                auto now = std::chrono::steady_clock::now();
+                auto dt_sec = std::chrono::duration<double>(now - last_log_tp_).count();
+                if (dt_sec >= 1.0) {
+                    int imu_hz = XlabUeMetrics::getImuHz();
+                    int pwm_hz = dt_sec > 0.0 ? static_cast<int>(std::lround(pwm_read_count_sec_ / dt_sec)) : 0;
+                    // populate from last telemetry if available (gyro deg/s, acc m/s^2)
+                    double gx = have_telem_ ? (last_telem_.gyro[0] * 57.2957795131) : 0.0;
+                    double gy = have_telem_ ? (last_telem_.gyro[1] * 57.2957795131) : 0.0;
+                    double gz = have_telem_ ? (last_telem_.gyro[2] * 57.2957795131) : 0.0;
+                    double ax = have_telem_ ? last_telem_.acc[0] : 0.0;
+                    double ay = have_telem_ ? last_telem_.acc[1] : 0.0;
+                    double az = have_telem_ ? last_telem_.acc[2] : 0.0;
+                    double mx = have_telem_ ? last_telem_.mag[0] : 0.0;
+                    double my = have_telem_ ? last_telem_.mag[1] : 0.0;
+                    double mz = have_telem_ ? last_telem_.mag[2] : 0.0; int mag_hz=0;
+                    double alt = have_telem_ ? last_telem_.alt : 0.0; int baro_hz = 0;
+                    double nx = have_telem_ ? last_telem_.loc_ned[0] : 0.0;
+                    double ny = have_telem_ ? last_telem_.loc_ned[1] : 0.0;
+                    double nz = have_telem_ ? last_telem_.loc_ned[2] : 0.0; int loc_hz=0;
+                    Utils::log(Utils::stringf(
+                        "imu: %.2f %.2f %.2f %.2f %.2f %.2f(%dhz), mag: %.2f %.2f %.2f (%dhz) baro: %.2f (%dhz) loc: %.2f %.2f %.2f (%dhz) pwm: %d %d %d %d  (%dhz)",
+                        gx,gy,gz,ax,ay,az, imu_hz, mx,my,mz, mag_hz, alt, baro_hz, nx,ny,nz, loc_hz,
+                        last_pwm_r_[0], last_pwm_r_[1], last_pwm_r_[2], last_pwm_r_[3], pwm_hz));
+                    last_log_tp_ = now;
+                    pwm_read_count_sec_ = 0;
                 }
             }
         }
@@ -477,10 +491,14 @@ namespace airlib
         RCData last_rcData_;
 
         // External PWM reader (shared memory ring)
-        std::unique_ptr<XlabXMemoryReader> pwm_reader_;
         bool pwm_reader_inited_ = false;
+        std::unique_ptr<x_xsim> xsim_;
         std::chrono::steady_clock::time_point last_log_tp_{};
         int pwm_read_count_sec_ = 0;
+        int last_pwm_r_[4] = {0, 0, 0, 0};
+        // latest telemetry snapshot for combined logging
+        XSimTelemetry last_telem_{};
+        bool have_telem_ = false;
     };
 }
 } //namespace

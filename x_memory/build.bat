@@ -1,7 +1,7 @@
 @echo off
 setlocal ENABLEDELAYEDEXPANSION
 pushd %~dp0
-set TARGETS="airsim_server.cpp|airsim_server.exe|server" "airsim_client.cpp|airsim_client.exe|client" "flight_client.cpp|flight.exe|flight"
+set TARGETS="airsim_server.cpp|airsim_server.exe|server" "airsim_client.cpp|airsim_client.exe|client" "flight_client.cpp|flight.exe|flight" "xsim_server.cpp|xsim_server.exe|xsim_server" "xsim_client.cpp|xsim_client.exe|xsim_client"
 
 where cl.exe >nul 2>&1 || call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 where cl.exe >nul 2>&1 || (echo msvc: NOT FOUND & popd & endlocal & exit /b 1)
