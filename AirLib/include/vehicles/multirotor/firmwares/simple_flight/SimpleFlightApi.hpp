@@ -17,6 +17,8 @@
 #include "AirSimSimpleFlightCommon.hpp"
 #include "physics/PhysicsBody.hpp"
 #include "common/AirSimSettings.hpp"
+#include "common/XlabXMemoryAdapter.hpp"
+#include "common/XlabUeMetrics.hpp"
 
 //TODO: we need to protect contention between physics thread and API server thread
 
@@ -59,6 +61,54 @@ namespace airlib
 
             //update controller which will update actuator control signal
             firmware_->update();
+
+            // External PWM passthrough (read from shared memory ring and apply to motors)
+            if (!pwm_reader_inited_) {
+                pwm_reader_.reset(new XlabXMemoryReader());
+                // Must match the mapping name used by writers (e.g., ImuXsim / server)
+                pwm_reader_->initialize(std::string("AirSimSharedMemory"));
+                pwm_reader_inited_ = true;
+                last_log_tp_ = std::chrono::steady_clock::now();
+                pwm_read_count_sec_ = 0;
+                // ensure API control and arming are enabled so motor PWMs take effect
+                if (!isApiControlEnabled()) enableApiControl(true);
+                armDisarm(true);
+            }
+            if (pwm_reader_) {
+                float pwm[8] = {};
+                int count = 0;
+                if (pwm_reader_->read(pwm, 8, &count) && count >= 4) {
+                    auto to_unit = [](float us) {
+                        float v = (us - 1000.0f) / 1000.0f;
+                        if (v < 0.0f) v = 0.0f;
+                        if (v > 1.0f) v = 1.0f;
+                        return v;
+                    };
+                    float u0 = to_unit(pwm[0]);
+                    float u1 = to_unit(pwm[1]);
+                    float u2 = to_unit(pwm[2]);
+                    float u3 = to_unit(pwm[3]);
+                    // Apply immediately in passthrough mode
+                    commandMotorPWMs(u0, u1, u2, u3);
+
+                    // count successful dequeues and print once per second based on actual dt
+                    pwm_read_count_sec_++;
+                    auto now = std::chrono::steady_clock::now();
+                    auto dt_sec = std::chrono::duration<double>(now - last_log_tp_).count();
+                    if (dt_sec >= 1.0) {
+                        int r1 = static_cast<int>(pwm[0]);
+                        int r2 = static_cast<int>(pwm[1]);
+                        int r3 = static_cast<int>(pwm[2]);
+                        int r4 = static_cast<int>(pwm[3]);
+                        int hz = dt_sec > 0.0 ? static_cast<int>(std::lround(pwm_read_count_sec_ / dt_sec)) : 0;
+                        int imu_hz = XlabUeMetrics::getImuHz();
+                        // single-line combined log: pwm + imu
+                        Utils::log(Utils::stringf("pwm %d %d %d %d (%dhz), imu(%dhz)", r1, r2, r3, r4, hz, imu_hz));
+                        last_log_tp_ = now;
+                        pwm_read_count_sec_ = 0;
+                    }
+                }
+            }
         }
         virtual bool isApiControlEnabled() const override
         {
@@ -425,6 +475,12 @@ namespace airlib
         MultirotorApiParams safety_params_;
 
         RCData last_rcData_;
+
+        // External PWM reader (shared memory ring)
+        std::unique_ptr<XlabXMemoryReader> pwm_reader_;
+        bool pwm_reader_inited_ = false;
+        std::chrono::steady_clock::time_point last_log_tp_{};
+        int pwm_read_count_sec_ = 0;
     };
 }
 } //namespace

@@ -45,11 +45,6 @@ void AxlabSim::BeginPlay()
     _m.startTime = static_cast<float>(FDateTime::UtcNow().ToUnixTimestamp());
     __xlogC(FColor::Blue, 3.0f, "xlabSim initialized");
 
-    // PWM reader init (external x_memory path)
-    static msr::airlib::XlabXMemoryReader pwm_reader;
-    _pwmReaderPtr = &pwm_reader;
-    const std::string default_path = std::string("D:\\open\\x_memory\\pwm.bin");
-    _pwmReaderPtr->initialize(default_path);
     return;
 }
 
@@ -116,18 +111,7 @@ void AxlabSim::StopCommands()
 
 void AxlabSim::Tick(float DeltaTime) {
     Super::Tick(DeltaTime);
-    // Read PWM from external memory and feed API if available
-    if (_pwmReaderPtr) {
-        float pwm[8] = {};
-        int count = 0;
-        if (_pwmReaderPtr->read(pwm, 8, &count) && count >= 4) {
-            msr::airlib::MultirotorApiBase* api = ResolveApi(this);
-            if (api) {
-                // PWM 배열 순서는 사용자 약속에 맞게 조정 필요
-                api->moveByMotorPWMs(pwm[0], pwm[1], pwm[2], pwm[3], 0.02f);
-            }
-        }
-    }
+    // external PWM handling moved to API layer
 
     float currentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     float deltaTime = currentTime - _m.time.lastTime;

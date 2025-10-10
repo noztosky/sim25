@@ -23,6 +23,7 @@ private:
     int imu_count_;
     int pwm_count_;
     int baro_count_;
+    int pwm_sec_count_;
     bool metrics_started_;
     std::chrono::high_resolution_clock::time_point start_time_;
     // angle state updated every 1s
@@ -35,7 +36,7 @@ private:
     const std::chrono::microseconds imu_interval_{ std::chrono::microseconds(1000000 / IMU_TARGET_HZ) };
 
 public:
-    AirSimServer() : is_running_(false), imu_count_(0), pwm_count_(0), baro_count_(0), metrics_started_(false) {}
+    AirSimServer() : is_running_(false), imu_count_(0), pwm_count_(0), baro_count_(0), pwm_sec_count_(0), metrics_started_(false) {}
     
     ~AirSimServer() {
         stop();
@@ -104,6 +105,8 @@ public:
                     last_pwm_ = pwm_data;
                     last_pwm_valid_ = true;
                     processPWMData(pwm_data);
+                    // count only successful dequeues for Hz computation
+                    pwm_sec_count_++;
                 }
                 next_pwm_poll_time += pwm_poll_interval;
             }
@@ -115,8 +118,9 @@ public:
             if (std::chrono::duration_cast<std::chrono::seconds>(now - last_print_time).count() >= 1 && metrics_started_) {
                 print_count++;
                 double imu_frequency = fc_.get_imu_tx_hz();
-                double pwm_frequency = fc_.get_pwm_rx_hz();
                 double baro_frequency = fc_.get_baro_tx_hz();
+                double dt_sec = std::chrono::duration<double>(now - last_print_time).count();
+                double pwm_frequency = dt_sec > 0 ? static_cast<double>(pwm_sec_count_) / dt_sec : 0.0;
                 
                 int r = static_cast<int>(std::round(roll_deg_)); if (r<0) r+=360; r%=360;
                 int p = static_cast<int>(std::round(pitch_deg_)); if (p<0) p+=360; p%=360;
@@ -127,11 +131,19 @@ public:
                           << std::setw(3) << std::setfill('0') << p << " "
                           << std::setw(3) << std::setfill('0') << y << ") [cnt:" << imu_count_ << "], ";
                 std::cout << "BARO: " << std::fixed << std::setprecision(0) << baro_frequency << " Hz, ";
-                std::cout << "PWM: " << std::fixed << std::setprecision(0) << pwm_frequency << " Hz ";
                 if (last_pwm_valid_) {
-                    std::cout << "(" << last_pwm_.rotor1 << " " << last_pwm_.rotor2 << " " << last_pwm_.rotor3 << " " << last_pwm_.rotor4 << ")";
+                    int pwm_hz_i = static_cast<int>(std::lround(pwm_frequency));
+                    std::cout << "PWM: "
+                              << last_pwm_.rotor1 << " " << last_pwm_.rotor2 << " "
+                              << last_pwm_.rotor3 << " " << last_pwm_.rotor4
+                              << " (" << pwm_hz_i << "hz)";
+                }
+                else {
+                    int pwm_hz_i = static_cast<int>(std::lround(pwm_frequency));
+                    std::cout << "PWM: (" << pwm_hz_i << "hz)";
                 }
                 std::cout << std::endl;
+                pwm_sec_count_ = 0;
                 
                 last_print_time = now;
             }

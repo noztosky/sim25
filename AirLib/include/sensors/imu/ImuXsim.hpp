@@ -4,6 +4,7 @@
 #include "common/Common.hpp"
 #include "ImuBase.hpp"
 #include "common/VectorMath.hpp"
+#include "common/XlabUeMetrics.hpp"
 #include "common/XlabXMemoryAdapter.hpp"
 
 namespace msr
@@ -91,9 +92,8 @@ public:
         const TTimeDelta elapsed_sec = clock()->elapsedSince(last_log_time_);
         if (elapsed_sec >= 1.0) {
             const double hz = static_cast<double>(update_count_) / static_cast<double>(elapsed_sec);
-            const double yaw_deg = static_cast<double>(last_yaw_rad_) * 57.29577951308232;
-            Utils::log(Utils::stringf("ImuXsim.update(): %.1f Hz (%u calls), yaw_changed=%u, yaw=%.1f deg",
-                hz, static_cast<unsigned>(update_count_), static_cast<unsigned>(yaw_changed_count_), yaw_deg));
+            XlabUeMetrics::setImuHz(static_cast<int>(hz + 0.5));
+            // keep counters but suppress per-line IMU log to avoid duplicate lines; PWM logger prints combined line
             last_log_time_ = clock()->nowNanos();
             update_count_ = 0;
             yaw_changed_count_ = 0;

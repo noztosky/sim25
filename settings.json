@@ -18,7 +18,8 @@
         "Imu": {
           "SensorType": 2,
           "Enabled": true,
-          "Model": "Xsim"
+          "Model": "Xsim",
+          "UpdateFrequency": 1000
         },
         "Barometer": {
           "SensorType": 1,
@@ -29,7 +30,7 @@
       }
     }
   },
-  "AutoTakeoff": true,
+  "AutoTakeoff": false,
   "TakeoffAltitude": 5.0,
   "InitialVehicleState": "Armed",
   "ApiServerPort": 41451,
