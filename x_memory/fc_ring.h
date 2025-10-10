@@ -32,16 +32,18 @@ struct BaroData {
     double altitude; long long timestamp; int frequency; bool is_valid; char padding[3];
 };
 
-// SPSC ring-buffer layout for IMU
+// SPSC ring-buffer layout for IMU/PWM
 struct ImuSlot { ImuData data; uint32_t seq; };
+struct PwmSlot { PWMData data; uint32_t seq; };
 
 template <size_t CAP>
 struct SharedRingData {
     // IMU ring
     ImuSlot imu_slots[CAP];
     std::atomic<uint32_t> imu_head_seq; // last produced seq
-    // single-slot others (kept for compatibility)
-    PWMData pwm; std::atomic<int> pwm_sequence; std::atomic<bool> pwm_ready;
+    // PWM ring
+    PwmSlot pwm_slots[CAP];
+    std::atomic<uint32_t> pwm_head_seq; // last produced seq
     BaroData baro; std::atomic<int> baro_sequence; std::atomic<bool> baro_ready;
 };
 
@@ -61,7 +63,7 @@ public:
         if(!mem_){::CloseHandle(handle_); handle_=nullptr; return false;}
         std::memset(mem_,0,sizeof(Shared));
         mem_->imu_head_seq.store(0,std::memory_order_relaxed);
-        mem_->pwm_sequence.store(0,std::memory_order_relaxed); mem_->pwm_ready.store(false,std::memory_order_relaxed);
+        mem_->pwm_head_seq.store(0,std::memory_order_relaxed);
         mem_->baro_sequence.store(0,std::memory_order_relaxed); mem_->baro_ready.store(false,std::memory_order_relaxed);
         return true;
     }
@@ -110,9 +112,11 @@ public:
     }
     void client_submit_pwm(const PWMData& p){
         if(!mem_) return;
-        mem_->pwm = p;
-        mem_->pwm_sequence.fetch_add(1,std::memory_order_release);
-        mem_->pwm_ready.store(true,std::memory_order_release);
+        uint32_t next = mem_->pwm_head_seq.load(std::memory_order_relaxed)+1;
+        size_t idx = next % CAPACITY;
+        mem_->pwm_slots[idx].data = p;
+        mem_->pwm_slots[idx].seq = next;
+        mem_->pwm_head_seq.store(next,std::memory_order_release);
     }
 
     // Consumer helpers
@@ -126,9 +130,15 @@ public:
     }
     bool try_get_pwm(PWMData& out){
         if(!mem_) return false;
-        if(!mem_->pwm_ready.load(std::memory_order_acquire)) return false;
-        out = mem_->pwm;
-        mem_->pwm_ready.store(false,std::memory_order_release);
+        uint32_t head = mem_->pwm_head_seq.load(std::memory_order_acquire);
+        if(head == pwm_last_seq_) return false; // nothing new
+        if(head - pwm_last_seq_ > CAPACITY){ pwm_last_seq_ = head - (uint32_t)CAPACITY; } // overrun catch-up
+        uint32_t next = pwm_last_seq_ + 1;
+        size_t idx = next % CAPACITY;
+        uint32_t s = mem_->pwm_slots[idx].seq;
+        if(s != next) return false; // not committed yet
+        out = mem_->pwm_slots[idx].data;
+        pwm_last_seq_ = next;
         // server-side telemetry (pwm receive rate)
         pwm_cnt_.fetch_add(1, std::memory_order_relaxed);
         auto now = std::chrono::steady_clock::now();
@@ -162,6 +172,7 @@ private:
     std::thread imu_thread_, baro_thread_;
     std::mutex cb_m_; std::function<void(const ImuData&)> imu_cb_; std::function<void(const BaroData&)> baro_cb_;
     uint32_t last_seq_{0};
+    uint32_t pwm_last_seq_{0};
     // telemetry counters (client/server can update these if needed)
     std::atomic<double> imu_hz_{0.0}, pwm_hz_{0.0}, baro_hz_{0.0};
     std::chrono::steady_clock::time_point imu_start_{}, pwm_start_{}, baro_start_{}; std::atomic<uint64_t> imu_cnt_{0}, pwm_cnt_{0}, baro_cnt_{0};
