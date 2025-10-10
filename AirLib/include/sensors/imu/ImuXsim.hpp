@@ -5,6 +5,7 @@
 #include "ImuBase.hpp"
 #include "common/VectorMath.hpp"
 #include "common/XlabUeMetrics.hpp"
+#include "common/EarthUtils.hpp"
 // use new x_xsim shared memory for composite telemetry
 #include "D:\\open\\airsim\\x_memory\\x_xsim.h"
 #include "common/XlabXMemoryAdapter.hpp"
@@ -89,8 +90,12 @@ public:
                 d.loc_ned[1] = static_cast<double>(p.y());
                 d.loc_ned[2] = static_cast<double>(p.z());
                 d.alt = -static_cast<double>(p.z());
-                // mag not available here -> zero
-                d.mag[0] = 0.0; d.mag[1] = 0.0; d.mag[2] = 0.0;
+                // magnetic field: world(NED) -> body; use Earth dipole model in Gauss
+                Vector3r mag_world = EarthUtils::getMagField(gt.environment->getState().geo_point) * 1E4f; // Tesla->Gauss
+                Vector3r mag_body = VectorMath::transformToBodyFrame(mag_world, gt.kinematics->pose.orientation, true);
+                d.mag[0] = static_cast<double>(mag_body.x());
+                d.mag[1] = static_cast<double>(mag_body.y());
+                d.mag[2] = static_cast<double>(mag_body.z());
                 d.timestamp = ts_ns;
                 d.seq = seq_counter;
                 d.is_valid = true;
