@@ -1,0 +1,32 @@
+xsim_client log start
+imu: 0.00 0.00 0.00 0.00 0.00 -9.81(1030hz), mag: 0.25 0.03 0.37 (103hz) baro: -0.68 (103hz) loc: 0.00 0.00 0.68 (103hz) pwm: 1001 1000 1000 1000  (400hz)
+imu: 0.00 0.00 0.00 0.00 0.00 -9.81(1002hz), mag: 0.25 0.03 0.37 (100hz) baro: -0.68 (100hz) loc: 0.00 0.00 0.68 (100hz) pwm: 1001 1000 1000 1000  (400hz)
+ctl: att[r p y]= 0.00 0.00 0.00, err[ex ey]= 0.00 0.00, d[R P]= 0 0, I[R P]= 0.00 0.00, mix[FR RL FL RR]= 1601 1600 1600 1600, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+imu: 0.00 0.00 0.00 0.00 0.00 -9.81(999hz), mag: 0.25 0.03 0.37 (100hz) baro: -0.68 (100hz) loc: 0.00 0.00 0.68 (100hz) pwm: 1601 1600 1600 1600  (400hz)
+ctl: att[r p y]= -0.01 0.01 0.00, err[ex ey]= 0.00 -0.00, d[R P]= 0 0, I[R P]= -0.00 0.00, mix[FR RL FL RR]= 1601 1600 1600 1600, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.08 0.06 0.00, err[ex ey]= 0.00 -0.00, d[R P]= 0 0, I[R P]= -0.00 0.00, mix[FR RL FL RR]= 1601 1600 1600 1600, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.18 0.15 0.01, err[ex ey]= 0.00 -0.00, d[R P]= 0 0, I[R P]= -0.00 0.00, mix[FR RL FL RR]= 1601 1600 1600 1600, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.32 0.27 0.02, err[ex ey]= 0.01 -0.00, d[R P]= 0 0, I[R P]= -0.00 0.00, mix[FR RL FL RR]= 1601 1600 1600 1600, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.48 0.40 0.02, err[ex ey]= 0.01 -0.01, d[R P]= 0 0, I[R P]= -0.01 0.01, mix[FR RL FL RR]= 1601 1600 1600 1600, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.67 0.56 0.03, err[ex ey]= 0.01 -0.01, d[R P]= 0 0, I[R P]= -0.01 0.01, mix[FR RL FL RR]= 1601 1600 1600 1600, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.87 0.73 0.05, err[ex ey]= 0.02 -0.01, d[R P]= 0 0, I[R P]= -0.02 0.02, mix[FR RL FL RR]= 1601 1600 1600 1600, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -1.06 0.91 0.06, err[ex ey]= 0.02 -0.02, d[R P]= -1 1, I[R P]= -0.03 0.02, mix[FR RL FL RR]= 1601 1600 1602 1598, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -1.08 1.20 0.07, err[ex ey]= 0.02 -0.02, d[R P]= -1 1, I[R P]= -0.04 0.03, mix[FR RL FL RR]= 1601 1600 1602 1598, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+imu: 0.17 8.96 0.22 0.00 0.00 -9.92(1001hz), mag: 0.23 0.02 0.38 (100hz) baro: -0.63 (100hz) loc: -0.03 -0.04 0.63 (100hz) pwm: 1602 1599 1603 1597  (401hz)
+ctl: att[r p y]= -0.94 1.67 0.09, err[ex ey]= 0.02 -0.03, d[R P]= -1 2, I[R P]= -0.05 0.05, mix[FR RL FL RR]= 1602 1599 1603 1597, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.67 2.40 0.10, err[ex ey]= 0.01 -0.04, d[R P]= 0 3, I[R P]= -0.05 0.06, mix[FR RL FL RR]= 1604 1597 1603 1597, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.38 3.59 0.12, err[ex ey]= 0.01 -0.06, d[R P]= 0 5, I[R P]= -0.06 0.09, mix[FR RL FL RR]= 1606 1595 1605 1595, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.20 5.39 0.14, err[ex ey]= 0.00 -0.09, d[R P]= 0 7, I[R P]= -0.06 0.13, mix[FR RL FL RR]= 1608 1593 1607 1593, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.11 8.06 0.16, err[ex ey]= 0.00 -0.14, d[R P]= 0 11, I[R P]= -0.06 0.19, mix[FR RL FL RR]= 1612 1589 1611 1589, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.09 12.21 0.18, err[ex ey]= 0.00 -0.21, d[R P]= 0 17, I[R P]= -0.06 0.28, mix[FR RL FL RR]= 1618 1583 1617 1583, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.12 18.71 0.21, err[ex ey]= 0.00 -0.33, d[R P]= 0 26, I[R P]= -0.06 0.41, mix[FR RL FL RR]= 1627 1574 1626 1574, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.25 26.66 0.21, err[ex ey]= 0.01 -0.46, d[R P]= 0 37, I[R P]= -0.07 0.62, mix[FR RL FL RR]= 1638 1563 1637 1563, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.54 32.16 0.22, err[ex ey]= 0.01 -0.55, d[R P]= 0 45, I[R P]= -0.07 0.87, mix[FR RL FL RR]= 1646 1555 1645 1555, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.60 38.26 0.40, err[ex ey]= 0.01 -0.66, d[R P]= -1 53, I[R P]= -0.08 1.18, mix[FR RL FL RR]= 1653 1548 1654 1546, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+imu: -2.47 148.16 2.71 0.05 0.00 -8.82(997hz), mag: -0.27 0.02 0.36 (100hz) baro: -0.41 (100hz) loc: -0.58 -0.21 0.41 (100hz) pwm: 1660 1541 1661 1539  (401hz)
+ctl: att[r p y]= -0.59 44.98 0.65, err[ex ey]= 0.02 -0.76, d[R P]= -1 62, I[R P]= -0.09 1.54, mix[FR RL FL RR]= 1662 1539 1663 1537, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -0.80 53.26 0.96, err[ex ey]= 0.03 -0.90, d[R P]= -2 73, I[R P]= -0.10 1.96, mix[FR RL FL RR]= 1672 1529 1675 1525, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -1.41 60.37 1.50, err[ex ey]= 0.05 -1.00, d[R P]= -3 80, I[R P]= -0.12 2.45, mix[FR RL FL RR]= 1678 1523 1683 1517, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -1.56 65.89 2.59, err[ex ey]= 0.07 -1.09, d[R P]= -5 80, I[R P]= -0.15 2.99, mix[FR RL FL RR]= 1676 1525 1685 1515, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -2.40 78.79 1.50, err[ex ey]= 0.07 -1.27, d[R P]= -5 80, I[R P]= -0.19 3.59, mix[FR RL FL RR]= 1676 1525 1685 1515, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
+ctl: att[r p y]= -175.56 79.34 -172.59, err[ex ey]= -1.53 -0.15, d[R P]= 80 15, I[R P]= 0.14 4.03, mix[FR RL FL RR]= 1696 1505 1535 1665, base= 1600, bias= 1 0 0 0, inv[p r]= 1 0, kp= 80.00
