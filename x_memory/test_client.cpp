@@ -201,7 +201,11 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
 
     const int TAKEOFF_US = 1800;
     const int HOVER_US   = 1600;
-    const int BIAS_US    = 1;      // apply to rotor4 (RR)
+    // Per-rotor biases (FR, RL, FL, RR)
+    const int BIAS_FR = 1;
+    const int BIAS_RL = 3;
+    const int BIAS_FL = 5;
+    const int BIAS_RR = 6;
 
     for(;;){
         auto now = std::chrono::high_resolution_clock::now();
@@ -239,23 +243,39 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                 prev_ex = ex; prev_ey = ey;
                 float d_roll_us  = kd_roll_us_per_rad_s  * (-dex); // negative feedback
                 float d_pitch_us = kd_pitch_us_per_rad_s * (-dey);
-                // rounding to nearest us to avoid truncation bias
-                int d_roll  = static_cast<int>(std::lround(p_roll_us  + d_roll_us));
-                int d_pitch = static_cast<int>(std::lround(p_pitch_us + d_pitch_us));
-                // clamp corrections
-                auto clampd = [](int v, int lim){ return v > lim ? lim : (v < -lim ? -lim : v); };
-                d_roll = clampd(d_roll, 20);
-                d_pitch = clampd(d_pitch, 30);
+                // combined corrections (float throughout)
+                float c_roll_us  = p_roll_us  + d_roll_us;
+                float c_pitch_us = p_pitch_us + d_pitch_us;
+                // clamp corrections (floats)
+                auto clampdf = [](float v, float lim){ return v > lim ? lim : (v < -lim ? -lim : v); };
+                c_roll_us  = clampdf(c_roll_us,  20.0f);
+                c_pitch_us = clampdf(c_pitch_us, 30.0f);
                 // base hover + bias + PID mixer (FR, RL, FL, RR)
                 // Stabilizing signs: FR=base + d_pitch - d_roll, FL=base + d_pitch + d_roll,
                 // RL=base - d_pitch + d_roll, RR=base - d_pitch - d_roll (+bias)
-                r1 = static_cast<uint16_t>(HOVER_US + ( d_pitch - d_roll)); // FR
-                r3 = static_cast<uint16_t>(HOVER_US + ( d_pitch + d_roll)); // FL
-                r2 = static_cast<uint16_t>(HOVER_US + (-d_pitch + d_roll)); // RL
-                r4 = static_cast<uint16_t>(HOVER_US + (-d_pitch - d_roll) + BIAS_US); // RR with +1us bias
-                // clamp 1000..2000
-                auto clamp = [](uint16_t v){ if (v < 1000) return (uint16_t)1000; if (v > 2000) return (uint16_t)2000; return v; };
-                r1 = clamp(r1); r2 = clamp(r2); r3 = clamp(r3); r4 = clamp(r4);
+                float r1f = static_cast<float>(HOVER_US) + ( c_pitch_us - c_roll_us) + static_cast<float>(BIAS_FR); // FR
+                float r3f = static_cast<float>(HOVER_US) + ( c_pitch_us + c_roll_us) + static_cast<float>(BIAS_FL); // FL
+                float r2f = static_cast<float>(HOVER_US) + (-c_pitch_us + c_roll_us) + static_cast<float>(BIAS_RL); // RL
+                float r4f = static_cast<float>(HOVER_US) + (-c_pitch_us - c_roll_us) + static_cast<float>(BIAS_RR); // RR
+                // clamp 1000..2000 (floats)
+                auto clampf = [](float v){ if (v < 1000.0f) return 1000.0f; if (v > 2000.0f) return 2000.0f; return v; };
+                r1f = clampf(r1f); r2f = clampf(r2f); r3f = clampf(r3f); r4f = clampf(r4f);
+                // error-diffusion rounding (dither) to minimize quantization bias
+                static float frac1=0.0f, frac2=0.0f, frac3=0.0f, frac4=0.0f;
+                float v1 = r1f + frac1; float v2 = r2f + frac2; float v3 = r3f + frac3; float v4 = r4f + frac4;
+                int i1 = static_cast<int>(std::floor(v1 + 0.5f));
+                int i2 = static_cast<int>(std::floor(v2 + 0.5f));
+                int i3 = static_cast<int>(std::floor(v3 + 0.5f));
+                int i4 = static_cast<int>(std::floor(v4 + 0.5f));
+                frac1 = v1 - static_cast<float>(i1);
+                frac2 = v2 - static_cast<float>(i2);
+                frac3 = v3 - static_cast<float>(i3);
+                frac4 = v4 - static_cast<float>(i4);
+                // final assign
+                r1 = static_cast<uint16_t>(i1);
+                r2 = static_cast<uint16_t>(i2);
+                r3 = static_cast<uint16_t>(i3);
+                r4 = static_cast<uint16_t>(i4);
 
                 // 10 Hz debug PDI terms
             if ((now - last_log) >= LOG_INTERVAL) {
@@ -286,7 +306,8 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                     os << "takeoff_1800 mix[FR RL FL RR]= " << r1 << " " << r2 << " " << r3 << " " << r4
                        << " att[r p y]= " << roll_deg << " " << pitch_deg << " " << yaw_deg;
                 } else {
-                    os << "hover_bias rr+" << BIAS_US << " mix[FR RL FL RR]= " << r1 << " " << r2 << " " << r3 << " " << r4
+                    os << "hover_bias fr+" << BIAS_FR << " rl+" << BIAS_RL << " fl+" << BIAS_FL << " rr+" << BIAS_RR
+                       << " mix[FR RL FL RR]= " << r1 << " " << r2 << " " << r3 << " " << r4
                        << " att[r p y]= " << roll_deg << " " << pitch_deg << " " << yaw_deg;
                 }
                 logger.logText(os.str());
