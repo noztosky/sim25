@@ -257,10 +257,13 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
     bool yaw_ref_set = false;
     float yaw_ref_rad = 0.0f;
     // Yaw: angle + rate hold (small Kp to limit reliance on yaw angle)
-    const float kp_yaw_us_per_rad = 2.0f; // small angle hold to stop drift
-    const float kd_yaw_us_per_rad_s = 60.0f; // much stronger rate damping
+    const float kp_yaw_us_per_rad = 0.0f; // rate-only yaw hold (ignore angle)
+    const float kd_yaw_us_per_rad_s = 250.0f; // stronger rate damping
+    const float ki_yaw_us_per_rad_s = 180.0f; // integral to remove steady bias
+    const float yaw_i_limit_us = 120.0f;      // anti-windup clamp for I term
     const float YAW_RATE_SIGN =  1.0f; // polarity (flip to opposite if needed)
     static float last_cy_us = 0.0f; // for 10 Hz summary logging
+    static float yaw_i_accum_us = 0.0f; // yaw PI integrator (in microseconds)
     static float last_cp_us = 0.0f, last_cr_us = 0.0f; // for 10 Hz summary logging
     // Emergency GT fallback window when estimator diverges
     auto emergency_until = start;
@@ -274,6 +277,7 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
             if (elapsed_ms < TAKEOFF_MS) {
                 r1 = r2 = r3 = r4 = (uint16_t)TAKEOFF_US;
                 pid_roll.reset(); pid_pitch.reset();
+                yaw_i_accum_us = 0.0f; // reset yaw integral during takeoff
                 last_pid_tp = now;
             } else {
                 // Adaptive Mahony gains: first 1s after takeoff strong accel trust,
@@ -445,12 +449,17 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                 float e_yaw = wrap_pi(yaw_rad - yaw_ref_rad);
                 // use bias-corrected gyro rate from estimator update
                 float yaw_rate = latest_gyro_z; // rad/s
-                // angle + rate hold (small Kp to avoid over-reliance on yaw angle)
-                float c_yaw_us = kp_yaw_us_per_rad * (-e_yaw) + kd_yaw_us_per_rad_s * (-yaw_rate);
+                // rate PI (+ optional small angle P) for zero steady-state yaw-rate
+                // integral update with anti-windup limit
+                yaw_i_accum_us += ki_yaw_us_per_rad_s * (-yaw_rate) * static_cast<float>(dt_sec);
+                if (yaw_i_accum_us > yaw_i_limit_us) yaw_i_accum_us = yaw_i_limit_us; else if (yaw_i_accum_us < -yaw_i_limit_us) yaw_i_accum_us = -yaw_i_limit_us;
+                float c_yaw_us = kp_yaw_us_per_rad * (-e_yaw) + kd_yaw_us_per_rad_s * (-yaw_rate) + yaw_i_accum_us;
                 c_yaw_us *= YAW_RATE_SIGN; // quick polarity toggle
                 // wider clamp and earlier engagement
-                if (c_yaw_us > 100.0f) c_yaw_us = 100.0f; else if (c_yaw_us < -100.0f) c_yaw_us = -100.0f;
-                float cy = (elapsed_ms >= (TAKEOFF_MS + 500)) ? (Y_SIGN * c_yaw_us) : 0.0f;
+                if (c_yaw_us > 300.0f) c_yaw_us = 300.0f; else if (c_yaw_us < -300.0f) c_yaw_us = -300.0f;
+                bool yaw_active = (elapsed_ms >= (TAKEOFF_MS + 500));
+                if (!yaw_active) yaw_i_accum_us = 0.0f; // avoid windup before engagement
+                float cy = yaw_active ? (Y_SIGN * c_yaw_us) : 0.0f;
                 last_cy_us = cy;
                 // apply yaw mix: FR/RL +, FL/RR - (assumes rotor directions CW at FR/RL)
                 r1f += cy; // FR
@@ -539,7 +548,7 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
 
                 // anti-windup: if any motor saturates, clear integrators
                 bool saturated = (i1 <= 1002 || i1 >= 1998 || i2 <= 1002 || i2 >= 1998 || i3 <= 1002 || i3 >= 1998 || i4 <= 1002 || i4 >= 1998);
-                if (saturated) { pid_roll.reset(); pid_pitch.reset(); }
+                if (saturated) { pid_roll.reset(); pid_pitch.reset(); yaw_i_accum_us = 0.0f; }
 
                 // 50 Hz debug PDI terms and rate/mix snapshot (only when DIAG_MODE)
             if (DIAG_MODE && (now - last_debug) >= DEBUG_INTERVAL) {
@@ -634,7 +643,7 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                        << " mix[FR RL FL RR]= " << r1 << " " << r2 << " " << r3 << " " << r4
                        << " est[r p y]= " << roll_deg << " " << pitch_deg << " " << yaw_deg
                        << " gt[r p y]= " << gt_r << " " << gt_p << " " << gt_y
-                       << " yaw[rate,cy]= " << (have_telem ? static_cast<float>(last_telem.gyro[2]) : 0.0f) << "," << last_cy_us
+                       << " yaw[rate,cy]= " << latest_gyro_z << "," << last_cy_us
                        << " cp/cr(us)= " << last_cp_us << "/" << last_cr_us;
                 }
                 logger.logText(os.str());
