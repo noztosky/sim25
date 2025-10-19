@@ -9,20 +9,20 @@ flowchart LR
   end
 
   subgraph Virtual_FC
-    X[XSimIo<br/>SPSC ring, zero-copy]
-    E[Estimator<br/>~1 kHz (telemetry event)]
-    C[Controller<br/>400 Hz (fixed timer)]
+    X[XSimIo SPSC ring zero-copy]
+    E[Estimator ~1 kHz event-driven]
+    C[Controller 400 Hz fixed timer]
   end
 
-  SMS -- "telemetry_ring (~1 kHz, ts)" --> X
-  X -- "pwm_ring (400 Hz)" --> SMS
+  SMS -- "telemetry_ring ~1 kHz, ts" --> X
+  X -- "pwm_ring 400 Hz" --> SMS
 
   X --> E
   E --> C
 
-  IMU[IMU ~1 kHz] -.-> E
-  MAG[Mag ~50 Hz] -.-> E
-  BARO[Baro ~50–100 Hz] -.-> E
+  IMU[IMU 1 kHz] -.-> E
+  MAG[Mag 50 Hz] -.-> E
+  BARO[Baro 50-100 Hz] -.-> E
 ```
 
 주: SPSC lock‑free/zero‑copy 경로로 커널 경유 I/O와 복사를 회피하여 p95 지연·주기 지터를 감소시킨다.
