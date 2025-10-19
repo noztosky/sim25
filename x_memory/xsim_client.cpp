@@ -157,6 +157,11 @@ int main(){
     std::cout << "xsim_client" << std::endl;
     timeBeginPeriod(1);
 
+#ifdef _WIN32
+    // Elevate control loop (main) thread priority: Controller ~ High
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+#endif
+
     // create LOGS/timestamp.LOG via helper
     {
         std::string path = logger.openNew("LOGS");
@@ -178,6 +183,10 @@ int main(){
     // shared estimated quaternion (from rx thread)
     struct { std::atomic<float> w{1.0f}, x{0.0f}, y{0.0f}, z{0.0f}; } q_est;
     std::thread rx_thread([&]{
+#ifdef _WIN32
+        // Elevate estimator thread priority: Estimator ~ AboveNormal
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+#endif
         uint32_t last_seq = 0;
         AttitudeEstimator estimator; long long last_ts_ns = 0;
         while(running.load()){

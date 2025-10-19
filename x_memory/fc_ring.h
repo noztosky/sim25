@@ -155,7 +155,17 @@ public:
     void setup_rates(int,int,int){}
     void set_client_callbacks(const std::function<void(const ImuData&)>& imu_cb,
                               const std::function<void(const BaroData&)>& baro_cb){ std::lock_guard<std::mutex> lk(cb_m_); imu_cb_ = imu_cb; baro_cb_ = baro_cb; }
-    void start_client_workers(){ if(running_.exchange(true)) return; timeBeginPeriod(1); imu_thread_ = std::thread([this]{ imu_loop(); }); baro_thread_ = std::thread([this]{ baro_loop(); }); }
+    void start_client_workers(){ if(running_.exchange(true)) return; timeBeginPeriod(1); imu_thread_ = std::thread([this]{
+#ifdef _WIN32
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL); // Estimator worker
+#endif
+        imu_loop();
+    }); baro_thread_ = std::thread([this]{
+#ifdef _WIN32
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL); // Estimator worker
+#endif
+        baro_loop();
+    }); }
     void stop_client_workers(){ if(!running_.exchange(false)) return; if(imu_thread_.joinable()) imu_thread_.join(); if(baro_thread_.joinable()) baro_thread_.join(); timeEndPeriod(1); }
     static PWMData make_fixed_pwm(long long ts,int seq){ PWMData p{}; p.rotor1=p.rotor2=p.rotor3=p.rotor4=1000; p.timestamp=ts; p.frequency=seq; p.is_valid=true; std::memset(p.padding,0,sizeof p.padding); return p; }
     static BaroData make_fixed_baro(long long ts,int seq){ BaroData b{}; b.altitude=10.0; b.timestamp=ts; b.frequency=seq; b.is_valid=true; std::memset(b.padding,0,sizeof b.padding); return b; }

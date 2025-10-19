@@ -212,14 +212,20 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
     float kd_roll_us_per_rad_s  = 6.0f;
     float kd_pitch_us_per_rad_s = 7.0f;
     auto last_pid_tp = start;
-    // gyro LPF state for D-term
+    // gyro LPF state for D-term (PT2)
     static float gyro_x_filt = 0.0f, gyro_y_filt = 0.0f;
-    const float GYRO_LPF_ALPHA = 0.7f; // 0.7~0.8 gives ~30-50Hz effective at 400Hz
+    static float gyro_x_filt2 = 0.0f, gyro_y_filt2 = 0.0f;
+    const float GYRO_LPF_ALPHA = 0.5f;  // stage1
+    const float GYRO_LPF_ALPHA2 = 0.5f; // stage2
     // fixed trims (captured once after takeoff)
     static float trim_roll_us = 0.0f, trim_pitch_us = 0.0f;
+    static float trim_target_roll_us = 0.0f, trim_target_pitch_us = 0.0f; // ramp targets
     const float TRIM_LIMIT_US = 50.0f;
     const int TRIM_WINDOW_MS = 3000; // collect for 3s after takeoff
     bool trim_fixed = false;
+    bool trim_ramp_active = false;
+    auto trim_ramp_start = start;
+    const int TRIM_RAMP_MS = 800; // ramp in over 0.8s to avoid step
     double trim_ex_sum = 0.0, trim_ey_sum = 0.0; int trim_count = 0;
     const float TRIM_K_US_PER_RAD = 80.0f; // convert avg angle error -> microseconds
 
@@ -237,6 +243,7 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
     // diagnostic/estimation control
     const bool DIAG_MODE = false; // default 10 Hz summary only; set true for 50 Hz diag
     float est_kp_cur = 0.5f, est_ki_cur = 0.005f;
+    float est_kp_cmd = est_kp_cur, est_ki_cmd = est_ki_cur; // smoothed towards this
     estimator.setGains(est_kp_cur, est_ki_cur); // softer accel trust by default
     float gyro_bias[3] = {0.0f, 0.0f, 0.0f};
     float last_acc_norm = 9.81f;
@@ -265,8 +272,8 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
     static float last_cy_us = 0.0f; // for 10 Hz summary logging
     static float yaw_i_accum_us = 0.0f; // yaw PI integrator (in microseconds)
     static float last_cp_us = 0.0f, last_cr_us = 0.0f; // for 10 Hz summary logging
-    // Emergency GT fallback window when estimator diverges
-    auto emergency_until = start;
+    // Smooth EST/GT blend for control errors (avoid step source switching)
+    float gt_blend = 0.0f; // 0: EST only, 1: GT only
 
 
     for(;;){
@@ -280,20 +287,32 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                 yaw_i_accum_us = 0.0f; // reset yaw integral during takeoff
                 last_pid_tp = now;
             } else {
+                // dt for control updates (used by smoothing and PIDs)
+                double dt_sec = std::chrono::duration<double>(now - last_pid_tp).count();
+                last_pid_tp = now;
+                if (dt_sec < 0.0005) dt_sec = 0.0005; else if (dt_sec > 0.01) dt_sec = 0.01;
                 // Adaptive Mahony gains: first 1s after takeoff strong accel trust,
                 // then gate by accel magnitude to avoid dynamic under/over-correction
                 if (elapsed_ms < (TAKEOFF_MS + 1000)) {
-                    est_kp_cur = 2.0f; est_ki_cur = 0.02f;
+                    est_kp_cmd = 2.0f; est_ki_cmd = 0.02f;
                 } else {
                     const float g = 9.80665f;
                     float aerr = std::fabs(last_acc_norm - g);
                     if (aerr < 0.3f) {            // very near 1g -> trust accel more
-                        est_kp_cur = 0.8f; est_ki_cur = 0.008f;
+                        est_kp_cmd = 0.8f; est_ki_cmd = 0.008f;
                     } else if (aerr < 0.8f) {     // moderate dynamics
-                        est_kp_cur = 0.5f; est_ki_cur = 0.005f;
+                        est_kp_cmd = 0.5f; est_ki_cmd = 0.005f;
                     } else {                       // strong dynamics -> rely more on gyro
-                        est_kp_cur = 0.2f; est_ki_cur = 0.002f;
+                        est_kp_cmd = 0.2f; est_ki_cmd = 0.002f;
                     }
+                }
+                // Smooth gains towards commands to avoid steps
+                {
+                    float tau = 0.35f; // seconds
+                    float alpha = static_cast<float>(dt_sec) / tau;
+                    if (alpha < 0.0f) alpha = 0.0f; else if (alpha > 0.25f) alpha = 0.25f; // cap per-tick blend
+                    est_kp_cur += alpha * (est_kp_cmd - est_kp_cur);
+                    est_ki_cur += alpha * (est_ki_cmd - est_ki_cur);
                 }
                 estimator.setGains(est_kp_cur, est_ki_cur);
                 // Drain telemetry and update Mahony estimator for each new sample (~1 kHz)
@@ -358,19 +377,18 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                     if (dot > 1.0f) dot = 1.0f; else if (dot < -1.0f) dot = -1.0f;
                     qerr_deg_ctrl = 2.0f * std::acos(dot) * 57.2957795f;
                 }
-                // Emergency GT fallback: large est-vs-GT error or large tilt
-                if (have_telem && (qerr_deg_ctrl > 5.0f || std::fabs(gt_r_deg) > 5.0f || std::fabs(gt_p_deg) > 5.0f)) {
-                    emergency_until = now + std::chrono::milliseconds(1000);
+                // Smoothly blend EST/GT sources instead of step switching
+                float gt_w_cmd = (have_telem && (qerr_deg_ctrl > 5.0f || std::fabs(gt_r_deg) > 5.0f || std::fabs(gt_p_deg) > 5.0f)) ? 1.0f : 0.0f;
+                {
+                    float tau_blend = 0.25f; // seconds
+                    float alpha_b = static_cast<float>(dt_sec) / tau_blend;
+                    if (alpha_b < 0.0f) alpha_b = 0.0f; else if (alpha_b > 0.25f) alpha_b = 0.25f;
+                    gt_blend += alpha_b * (gt_w_cmd - gt_blend);
                 }
-                bool emergency_active = (now < emergency_until);
-                bool use_gt = emergency_active && have_telem;
-                float ex = use_gt ? ex_gt : ex_est;
-                float ey = use_gt ? ey_gt : ey_est;
+                float one_m = 1.0f - gt_blend;
+                float ex = one_m * ex_est + gt_blend * ex_gt;
+                float ey = one_m * ey_est + gt_blend * ey_gt;
                 if (!yaw_ref_set) { yaw_ref_set = true; yaw_ref_rad = yaw_rad; }
-                // dt for PID
-                double dt_sec = std::chrono::duration<double>(now - last_pid_tp).count();
-                last_pid_tp = now;
-                if (dt_sec < 0.0005) dt_sec = 0.0005; else if (dt_sec > 0.01) dt_sec = 0.01;
                 // PI components (with deadzone and conditional integral)
                 auto applyDeadzone = [](float v){ return (std::fabs(v) < 0.005f) ? 0.0f : v; };
                 float ex_eff = applyDeadzone(ex);
@@ -387,16 +405,18 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                 float ery = wy_ref - latest_gyro_y;
                 float p_roll_us  = pid_roll.compute(erx, dt_sec, allow_i_r);   // rate PI
                 float p_pitch_us = pid_pitch.compute(ery, dt_sec, allow_i_p);  // rate PI
-                // D components from gyro (bias-corrected) with LPF and clamp
-                gyro_x_filt = GYRO_LPF_ALPHA * gyro_x_filt + (1.0f - GYRO_LPF_ALPHA) * latest_gyro_x;
-                gyro_y_filt = GYRO_LPF_ALPHA * gyro_y_filt + (1.0f - GYRO_LPF_ALPHA) * latest_gyro_y;
+                // D components from gyro (bias-corrected) with PT2 LPF and clamp
+                gyro_x_filt = GYRO_LPF_ALPHA  * gyro_x_filt  + (1.0f - GYRO_LPF_ALPHA)  * latest_gyro_x;
+                gyro_y_filt = GYRO_LPF_ALPHA  * gyro_y_filt  + (1.0f - GYRO_LPF_ALPHA)  * latest_gyro_y;
+                gyro_x_filt2 = GYRO_LPF_ALPHA2 * gyro_x_filt2 + (1.0f - GYRO_LPF_ALPHA2) * gyro_x_filt;
+                gyro_y_filt2 = GYRO_LPF_ALPHA2 * gyro_y_filt2 + (1.0f - GYRO_LPF_ALPHA2) * gyro_y_filt;
                 auto clampd = [](float v, float lim){ if (v > lim) return lim; if (v < -lim) return -lim; return v; };
-                float d_roll_us  = clampd(kd_roll_us_per_rad_s  * (-gyro_x_filt), 20.0f); // negative feedback
-                float d_pitch_us = clampd(kd_pitch_us_per_rad_s * (-gyro_y_filt), 20.0f);
+                float d_roll_us  = clampd(kd_roll_us_per_rad_s  * (-gyro_x_filt2), 12.0f); // tighter clamp
+                float d_pitch_us = clampd(kd_pitch_us_per_rad_s * (-gyro_y_filt2), 12.0f);
                 // combined corrections (float throughout)
                 float c_roll_us  = p_roll_us  + d_roll_us;
                 float c_pitch_us = p_pitch_us + d_pitch_us;
-                // trim capture window: collect 3s after takeoff, then fix trims
+                // trim capture window: collect 3s after takeoff, then fix trims (with ramp-in)
                 if (!trim_fixed) {
                     if (elapsed_ms >= TAKEOFF_MS && elapsed_ms < (TAKEOFF_MS + TRIM_WINDOW_MS)) {
                         trim_ex_sum += static_cast<double>(ex_eff);
@@ -405,10 +425,18 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                     } else if (elapsed_ms >= (TAKEOFF_MS + TRIM_WINDOW_MS)) {
                         float ex_avg = (trim_count > 0) ? static_cast<float>(trim_ex_sum / trim_count) : 0.0f;
                         float ey_avg = (trim_count > 0) ? static_cast<float>(trim_ey_sum / trim_count) : 0.0f;
-                        trim_roll_us  = std::max(-TRIM_LIMIT_US, std::min(TRIM_LIMIT_US, -TRIM_K_US_PER_RAD * ex_avg));
-                        trim_pitch_us = std::max(-TRIM_LIMIT_US, std::min(TRIM_LIMIT_US, -TRIM_K_US_PER_RAD * ey_avg));
-                        trim_fixed = true;
+                        trim_target_roll_us  = std::max(-TRIM_LIMIT_US, std::min(TRIM_LIMIT_US, -TRIM_K_US_PER_RAD * ex_avg));
+                        trim_target_pitch_us = std::max(-TRIM_LIMIT_US, std::min(TRIM_LIMIT_US, -TRIM_K_US_PER_RAD * ey_avg));
+                        trim_ramp_active = true; trim_ramp_start = now; trim_fixed = true;
                     }
+                }
+                // apply trim ramp-in
+                if (trim_ramp_active) {
+                    auto ramp_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - trim_ramp_start).count();
+                    float a = ramp_elapsed <= 0 ? 0.0f : (ramp_elapsed >= TRIM_RAMP_MS ? 1.0f : static_cast<float>(ramp_elapsed) / static_cast<float>(TRIM_RAMP_MS));
+                    trim_roll_us  = a * trim_target_roll_us;
+                    trim_pitch_us = a * trim_target_pitch_us;
+                    if (a >= 1.0f) trim_ramp_active = false;
                 }
 
                 // feed ex/ey to auto-tuner statistics
@@ -532,7 +560,7 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                 {
                     static int prev1 = HOVER_US, prev2 = HOVER_US, prev3 = HOVER_US, prev4 = HOVER_US;
                     auto clampi = [](int dv, int lim){ if (dv > lim) return lim; if (dv < -lim) return -lim; return dv; };
-                    const int SLEW_US = 8;
+                    const int SLEW_US = 4;
                     int d1 = clampi(i1 - prev1, SLEW_US);
                     int d2 = clampi(i2 - prev2, SLEW_US);
                     int d3 = clampi(i3 - prev3, SLEW_US);
@@ -586,7 +614,7 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
                         << " ratio(ex/ey)= " << ratio_ex << "/" << ratio_ey
                         << " gains[kp ki]= " << est_kp_cur << " " << est_ki_cur
                         << " acc_norm= " << last_acc_norm
-                        << " src= " << (use_gt ? "GT" : "EST")
+                        << " src= " << (gt_blend > 0.5f ? "GT" : "EST") << "(w=" << gt_blend << ")"
                         << " cp/cr(us)= " << cp << "/" << cr
                         << " mix_avg= " << mix_avg;
                     logger.logText(os2.str());
@@ -658,6 +686,11 @@ int main()
 {
 	std::cout << "test_client" << std::endl;
 	timeBeginPeriod(1);
+
+	// Elevate control loop thread priority on Windows (Controller ~ High)
+	#ifdef _WIN32
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+	#endif
 
 	LogHelper logger;
 	{
