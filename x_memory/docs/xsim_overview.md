@@ -4,14 +4,14 @@ AirSim–xsim을 공유메모리 기반 IPC(XSimIo)로 연동해 고주파 폐�
 
 ```mermaid
 flowchart LR
-  subgraph AirSim_(sim)
+  subgraph AirSim
     SMS[Shared Memory Server]
   end
 
   subgraph Virtual_FC
-    X[XSimIo\nSPSC ring, zero-copy]
-    E[Estimator\n~1 kHz (telemetry event)]
-    C[Controller\n400 Hz (fixed timer)]
+    X[XSimIo<br/>SPSC ring, zero-copy]
+    E[Estimator<br/>~1 kHz (telemetry event)]
+    C[Controller<br/>400 Hz (fixed timer)]
   end
 
   SMS -- "telemetry_ring (~1 kHz, ts)" --> X
@@ -20,9 +20,9 @@ flowchart LR
   X --> E
   E --> C
 
-  IMU[(IMU ~1 kHz)] -.-> E
-  MAG[(Mag ~50 Hz)] -.-> E
-  BARO[(Baro ~50–100 Hz)] -.-> E
+  IMU[IMU ~1 kHz] -.-> E
+  MAG[Mag ~50 Hz] -.-> E
+  BARO[Baro ~50–100 Hz] -.-> E
 ```
 
 주: SPSC lock‑free/zero‑copy 경로로 커널 경유 I/O와 복사를 회피하여 p95 지연·주기 지터를 감소시킨다.
