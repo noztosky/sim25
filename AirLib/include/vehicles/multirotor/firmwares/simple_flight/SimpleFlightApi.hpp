@@ -93,8 +93,30 @@ namespace airlib
                     commandMotorPWMs(u0, u1, u2, u3);
                     pwm_read_count_sec_++;
                 }
-                // consume latest telemetry to populate values
-                xsim_->consume_telem(last_telem_seq, [this](const XSimTelemetry& d){ last_telem_ = d; have_telem_ = true; });
+                // consume latest telemetry to populate values (and accumulate aux stream ticks)
+                xsim_->consume_telem(last_telem_seq, [this](const XSimTelemetry& d){
+                    last_telem_ = d; have_telem_ = true;
+                    auto now = std::chrono::steady_clock::now();
+                    using namespace std::chrono;
+                    if ((now - last_loc_tick_tp_) >= milliseconds(10)) { ++loc_count_sec_; last_loc_tick_tp_ = now; }
+                });
+                // poll AirSim sensors to get true 100 Hz counts for baro/mag
+                {
+                    const auto& baro_out = getBarometerData("");
+                    if (baro_out.time_stamp != last_baro_ts_ns_) {
+                        last_baro_ts_ns_ = baro_out.time_stamp;
+                        latest_baro_alt_ = baro_out.altitude;
+                        ++baro_count_sec_exact_;
+                    }
+                    const auto& mag_out = getMagnetometerData("");
+                    if (mag_out.time_stamp != last_mag_ts_ns_) {
+                        last_mag_ts_ns_ = mag_out.time_stamp;
+                        latest_mag_[0] = mag_out.magnetic_field_body.x();
+                        latest_mag_[1] = mag_out.magnetic_field_body.y();
+                        latest_mag_[2] = mag_out.magnetic_field_body.z();
+                        ++mag_count_sec_exact_;
+                    }
+                }
                 // 1-second combined log (even if no new PWM in this tick)
                 auto now = std::chrono::steady_clock::now();
                 auto dt_sec = std::chrono::duration<double>(now - last_log_tp_).count();
@@ -108,19 +130,25 @@ namespace airlib
                     double ax = have_telem_ ? last_telem_.acc[0] : 0.0;
                     double ay = have_telem_ ? last_telem_.acc[1] : 0.0;
                     double az = have_telem_ ? last_telem_.acc[2] : 0.0;
-                    double mx = have_telem_ ? last_telem_.mag[0] : 0.0;
-                    double my = have_telem_ ? last_telem_.mag[1] : 0.0;
-                    double mz = have_telem_ ? last_telem_.mag[2] : 0.0; int mag_hz=0;
-                    double alt = have_telem_ ? last_telem_.alt : 0.0; int baro_hz = 0;
+                    // use sensor-based latest values for mag/baro, and compute Hz from true update counts (~100 Hz)
+                    double mx = latest_mag_[0];
+                    double my = latest_mag_[1];
+                    double mz = latest_mag_[2];
+                    int mag_hz = dt_sec > 0.0 ? static_cast<int>(std::lround(mag_count_sec_exact_ / dt_sec)) : 0;
+                    double alt = latest_baro_alt_;
+                    int baro_hz = dt_sec > 0.0 ? static_cast<int>(std::lround(baro_count_sec_exact_ / dt_sec)) : 0;
                     double nx = have_telem_ ? last_telem_.loc_ned[0] : 0.0;
                     double ny = have_telem_ ? last_telem_.loc_ned[1] : 0.0;
-                    double nz = have_telem_ ? last_telem_.loc_ned[2] : 0.0; int loc_hz=0;
+                    double nz = have_telem_ ? last_telem_.loc_ned[2] : 0.0;
+                    int loc_hz = dt_sec > 0.0 ? static_cast<int>(std::lround(loc_count_sec_ / dt_sec)) : 0;
                     Utils::log(Utils::stringf(
-                        "imu: %.2f %.2f %.2f %.2f %.2f %.2f(%dhz), mag: %.2f %.2f %.2f (%dhz) baro: %.2f (%dhz) loc: %.2f %.2f %.2f (%dhz) pwm: %d %d %d %d  (%dhz)",
+                        "imu: %.2f %.2f %.2f %.2f %.2f %.2f(%dHz), mag: %.2f %.2f %.2f (%dHz) baro: %.2f (%dHz) loc: %.2f %.2f %.2f (%dHz) pwm: %d %d %d %d  (%dHz)",
                         gx,gy,gz,ax,ay,az, imu_hz, mx,my,mz, mag_hz, alt, baro_hz, nx,ny,nz, loc_hz,
                         last_pwm_r_[0], last_pwm_r_[1], last_pwm_r_[2], last_pwm_r_[3], pwm_hz));
                     last_log_tp_ = now;
                     pwm_read_count_sec_ = 0;
+                    baro_count_sec_exact_ = mag_count_sec_exact_ = 0;
+                    loc_count_sec_ = 0;
                 }
             }
         }
@@ -499,6 +527,13 @@ namespace airlib
         // latest telemetry snapshot for combined logging
         XSimTelemetry last_telem_{};
         bool have_telem_ = false;
+        // aux stream counters/state (approx and exact via sensors)
+        int loc_count_sec_ = 0;
+        std::chrono::steady_clock::time_point last_loc_tick_tp_{};
+        int baro_count_sec_exact_ = 0, mag_count_sec_exact_ = 0;
+        uint64_t last_baro_ts_ns_ = 0, last_mag_ts_ns_ = 0;
+        double latest_baro_alt_ = 0.0;
+        double latest_mag_[3] = {0.0, 0.0, 0.0};
     };
 }
 } //namespace
