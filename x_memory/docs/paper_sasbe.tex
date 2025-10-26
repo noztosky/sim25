@@ -1,0 +1,147 @@
+AirSim 연동 고주파 제어 벤치마크와 안정화 키트: 설계·어블레이션·평가
+
+AirSim-Integrated High-Frequency Control Benchmark and Stabilization Toolkit: Design, Ablation, and Evaluation
+
+개요
+  소형 멀티로터의 자세 제어는 모터 비대칭, 센서 바이어스, 추정기 게인 스위칭으로 인해 출력 스파이크(“팅김”)와 yaw 드리프트가 빈번하다. 본 연구는 실환경 제약을 반영한 경량 안정화 패키지를 제안한다. 제어 구조는 외부 자세 P-내부 각속도 PI+D의 2중 루프를 사용하며, (1) yaw rate-PI(anti-windup)로 영(0) 각속도 수렴, (2) 자이로 D-term에 2단 PT2 저역통과로 고주파 노이즈 억제, (3) 호버 트림을 3초 관측 후 선형 램프-인, (4) Mahony 추정기의 가감속 신뢰도 게인을 시간상수로 스무딩, (5) 추정기/GT 소스 전환을 연속 가중 블렌딩으로 계단 효과 제거, (6) 모터 Slew 제한으로 실제 출력 급변을 완화한다. AirSim-xsim 공유메모리 IPC를 통해 ~1 kHz 텔레메트리(타임스탬프 포함)와 400 Hz PWM의 고주파 폐루프를 구현하고, 링버퍼·비블로킹 소비·고해상도 동기화로 지연/지터를 최소화하였다. 모터/자이로 바이어스 및 동적 가속 조건에서 평가한 결과, 제안 기법은 스파이크 피크-투-피크와 포화 점유율을 유의하게 감소시키고, yaw 정지(rate→0)와 자세 RMS 오차를 개선하였다. 어블레이션으로 “한 번씩 튀는” 현상이 D-term 고주파 성분과 트림/게인 계단의 합성 효과임을 보였고, PT2+클램프 축소·트림 램프-인·게인 스무딩으로 제어입력 연속성을 회복함을 확인했다. 본 패키지는 오픈소스 오토파일럿의 실무 기법을 고주파 공유메모리 폐루프에 통합해, 시뮬레이터/HIL 개발에 즉시 적용 가능한 안정화 가이드를 제시한다.
+
+Abstract
+  Small multirotor attitude control often suffers from output spikes and yaw drift due to motor asymmetry, sensor bias, and estimator gain switching. This work proposes a lightweight stabilization package tailored to real-world constraints. The controller adopts a two-loop structure—outer attitude P and inner rate PI+D—and combines: (1) yaw rate-PI with anti-windup to drive angular rate to zero, (2) a two-stage PT2 low-pass filter on the gyro D-term to suppress high-frequency noise, (3) linear ramp-in of hover trim after a 3 s observation window, (4) time-constant-based smoothing of the Mahony estimator’s acceleration-trust gains, (5) continuous estimator/ground-truth source blending to eliminate step transitions, and (6) motor slew limiting to reduce abrupt output changes. We implement a high-frequency closed loop via AirSim-xsim shared-memory IPC, consuming timestamped telemetry at ~1 kHz and transmitting PWM at 400 Hz; a ring buffer, non-blocking consumption, and high-resolution timebase synchronization minimize latency and jitter. Under injected motor/gyro biases and dynamic acceleration, the proposed methods significantly reduce peak-to-peak spikes and saturation occupancy, achieve yaw stop (rate → 0), and improve attitude RMS error. Ablation shows that the intermittent “single-pop” spikes arise from the joint effects of high-frequency D-term content and stepwise trim/gain application; continuity is restored via PT2 with tighter clamps, trim ramp-in, and gain smoothing. By integrating filtering, anti-windup, and smoothing practices common in open-source autopilots into a high-frequency shared-memory loop, this work offers a practical stabilization guide readily applicable to simulator and HIL development.
+
+keyword: 멀티로터, 자세 제어, D-term 필터링, anti-windup, 추정기 스무딩, 공유메모리 IPC, AirSim
+
+Ⅰ. 서 론
+  소형 멀티로터의 자세 제어는 모터/기체 비대칭, 센서 바이어스와 고주파 노이즈, 추정기 게인의 상황별 스위칭 등 실환경 요인으로 인해 출력 스파이크(“팅김”)와 장기적 yaw 드리프트가 빈번하게 발생한다. 이러한 현상은 D-term이 자이로 고주파 성분에 과민하고, 트림(바이어스 보정)이나 추정기 게인이 계단(step)으로 적용되며, 액추에이터의 물리적 제약(포화·율제한)과 상호작용하면서 증폭된다. 결과적으로 단일 파라미터 튜닝이나 개별 기법만으로는 재현성과 강인성을 동시에 확보하기 어렵다.
+본 연구는 AirSim과 제어기 사이에 공유 메모리 기반 IPC(Inter-Process Communication; XSimIo)를 사용해 약 1 kHz 텔레메트리(타임스탬프 포함)와 400 Hz PWM으로 구성된 고주파 폐루프를 구현하고, 지연·지터를 최소화한 환경에서 “튀는” 현상과 yaw 드리프트를 체계적으로 완화하는 경량 안정화 패키지를 제안한다. 제어 구조는 외부 자세 P-내부 각속도 PI+D의 표준 2중 루프를 채택하되, 필터링·스무딩·anti-windup·출력 제약을 충돌 없이 결합하여 제어입력의 연속성과 고주파 강인성을 동시에 달성하도록 설계하였다.
+
+본 연구의 기여는 다음과 같다.
+- 실용 안정화 패키지. yaw rate-PI(anti-windup)로 영(0) 각속도 수렴을 보장하고, 자이로 D-term에 2단 PT2(2차 저역통과)와 타이트한 클램프(±12 μs)를 적용해 고주파 스파이크를 억제한다.
+- 연속성 확보. 호버 트림을 3 s 관측 후 0.8 s 선형 램프-인으로 적용하고, Mahony 추정기의 가감속 신뢰도 게인을 시간상수 기반 EMA(Exponential Moving Average)로 스무딩하며, 추정기/GT(Ground Truth) 소스를 연속 가중 블렌딩으로 전환해 단계 입력을 제거한다.
+- 액추에이터 보호. 모터 Slew(명령 변화율) 제한(샘플 간 4 μs)으로 실제 출력 급변을 완화하고 포화 점유율을 저감한다.
+- 고주파 벤치마크. AirSim-xsim 공유메모리 폐루프에서 모터/자이로 바이어스·동적 가속 조건을 가하며 cp/cr, cy, yaw rate, 포화율, peak-to-peak 등 지표로 정량 평가한다.
+- 원인 분해/어블레이션. “한 번씩 튀는” 현상이 D-term 고주파 성분과 트림/게인 계단의 합성 효과임을 보이고, PT2+클램프 축소·트림 램프-인·게인 스무딩의 결합이 제어입력 연속성을 회복함을 실증한다(섹션 V 참조).
+ 이로써 제안 패키지는 스파이크의 피크-투-피크와 포화 점유율을 유의하게 감소시키고, yaw 정지(rate→0)와 자세 RMS 오차를 개선한다. 본 접근은 오픈소스 오토파일럿(예: ArduPilot)에서 축적된 실무 원리를 고주파 공유메모리 폐루프 맥락에 맞춰 통합·스무딩·램핑한 점에서 실용적 독창성을 가지며, 시뮬레이터 및 HIL 기반 개발에 즉시 적용 가능한 안정화 레퍼런스를 제공한다.
+
+Ⅱ. 관련 연구 (Related Works)
+오픈소스 오토파일럿의 표준 구조와 실무 튜닝
+ArduPilot/PX4는 외부 자세 P-내부 각속도 PID(혹은 PI+D) 2중 루프를 표준으로 채택하며, 실기체 진동·노이즈·포화 대응을 위해 다음 실무 기능을 제공한다: D-term 저역통과(PT1/PT2) 및 노치 필터, 적분 제한/프리즈(anti-windup), 모터 출력 Slew 제한, Feedforward, 센서 필터 체인(자이로/가속도) 등. 이들 기능의 개별 효과와 튜닝 지침은 문서·가이드·포럼에서 광범위하게 축적되어 있다. 다만 “여러 기법을 동시에 조합했을 때의 상호작용”을 어블레이션으로 체계적으로 정리한 공개 자료는 제한적이다. [1], [2]
+PID 적분기 관리: Anti-windup과 Bumpless 전이
+포화·율제한이 있는 액추에이터에서 적분기 과적분은 오버슛/긴 복구시간을 유발한다. 이를 완화하기 위해 고전 제어 문헌에서는 적분 제한(Integral Limit), 백-계산(Back-calculation), 조건부 적분(Conditional Integration), I-freeze/decay(포화 시 적분 동결/감쇠), 목표/게인 변경 시의 Bumpless Transfer(출력 계단 최소화) 등을 제안한다. 멀티로터 분야에서도 유사 원칙이 적용되며, 속도 루프의 steady-state 바이어스를 제거하기 위해 rate-PI + anti-windup이 널리 사용된다. [3], [4]
+D-term 필터링과 미분 성형
+미분(D)은 고주파 노이즈·진동 모드에 민감하기 때문에, PT1/PT2 저역통과, 정적/동적 노치(dyn-notch), 미분 성형(differentiator shaping)으로 고주파 성분을 억제한다. 실무에서는 D-term에 독립 필터 체인을 두고, D 클램프(출력 제한)와 함께 모터 Slew 제한을 병행해 “한 번씩 튀는 스파이크”와 포화 점유율을 줄인다. [5], [6]
+추정기 게인 스케줄링과 스무딩
+Mahony/Madgwick/EKF 류 추정기는 동적 상태(가속도 크기, 기동률, 진동 환경)에 따라 가속도 신뢰도(kp/ki)를 스케줄링한다. 그러나 구간별 “계단 전환”은 제어 루프에 단계 입력을 유입해 과도 응답을 키울 수 있어, 시간상수(EMA) 기반의 연속 스무딩으로 천이를 부드럽게 하는 접근이 보고된다. [7], [8]
+소스 전환(EST/GT)과 연속 블렌딩
+센서/소스 전환(예: EST↔GT, 센서 페일오버)은 단계 전이가 발생하면 루프에 큰 버스트를 주기 쉽다. 이를 막기 위해 일정 기간 동안 연속 가중(0→1) 블렌딩을 적용, 전환을 연속화하는 기법이 센서퓨전·로버스트 필터링 문헌에 제안되어 왔다. [9]
+액추에이터 제약: 포화·율제한과 Slew
+액추에이터 포화/율제한(rate limit)은 anti-windup 설계의 핵심 전제이며, 실제 시스템에서는 출력 Slew(명령 변화율 제한)로 전기/기계 과도를 억제하고 구동부 보호와 응답 연속성을 확보한다. 멀티로터 제어기에서도 per-모터 Slew 설정이 일반화되어 있다. [10], [11]
+시뮬레이션/HIL 검증 관행
+AirSim, Gazebo 등 시뮬레이터와 HIL 환경에서 PID/필터/튜닝 연구가 다수 보고되었다. 다만 AirSim과 컨트롤러를 “공유 메모리 IPC”로 직결해 ~1 kHz 텔레메트리(타임스탬프 포함)와 400 Hz PWM을 고주파 폐루프로 운용하며, 트림 램프-인·EST/GT 블렌딩·PT2 D+클램프+Slew를 “동시에” 적용하고 어블레이션/정량 지표(peak-to-peak, 포화율, yaw rate, cp/cr, cy)로 효과를 체계 비교한 공개 사례는 제한적이다. [12]
+본 연구와의 차별성(정리)
+“개별 기법”의 도입이 아니라, 고주파 공유메모리 폐루프 맥락에서 트림 램프-인, EST/GT 연속 블렌딩, PT2 D(타이트 클램프), 모터 Slew, yaw rate-PI(anti-windup)를 충돌 없이 “동시에” 결합.
+“튀는 스파이크”의 원인을 D 고주파 성분 + 트림/게인 계단 적용의 합성효과로 분해하고, 세부 기법(PT2+D클램프·트림 램프-인·게인 스무딩)이 제어입력 연속성을 회복한다는 점을 어블레이션과 정량 지표로 증명.
+AirSim-xsim 공유메모리 IPC로 실험의 지연/지터를 낮춘 상태에서 재현 가능한 벤치마크 프로토콜을 제시.
+
+Reference.
+[1] ArduPilot, “Copter PID Tuning and Rate Controller (ATC_RAT_), Filter/Notch Docs.” Available: https://ardupilot.org/copter/docs/tuning.html (accessed Oct. 2025).
+[2] PX4 Dev Team, “Multicopter PID Tuning Guide (MC_* parameters, D-term cutoff).” Available: https://docs.px4.io/main/en/config_mc/pid_tuning_guide_multicopter.html (accessed Oct. 2025).
+[3] K. J. Åström and T. Hägglund, Advanced PID Control. Research Triangle Park, NC: ISA, 2006.
+[4] L. Zaccarian and A. R. Teel, Modern Anti-windup Synthesis: Control Augmentation for Actuator Saturation. Princeton, NJ: Princeton Univ. Press, 2011.
+[5] ArduPilot, “IMU Notch / Dynamic Notch Filtering.” Available: https://ardupilot.org/copter/docs/common-imu-notch-filtering.html (accessed Oct. 2025).
+[6] ArduPilot, “IMU Filtering Reference (INS_GYRO_FILTER, PID D-term filtering).” Available: https://ardupilot.org/copter/docs/common-imu-filtering.html (accessed Oct. 2025).
+[7] R. Mahony, T. Hamel, and J.-M. Pflimlin, “Nonlinear complementary filters on the special orthogonal group,” Proc. 47th IEEE CDC, 2008, pp. 1477-1484. doi:10.1109/CDC.2008.4739011.
+[8] S. O. H. Madgwick, “An efficient orientation filter for inertial/magnetic sensor arrays,” Tech. Report, 2010. Available: http://x-io.co.uk/open-source-imu-and-ahrs-algorithms/ (accessed Oct. 2025).
+[9] Y. Bar-Shalom, X.-R. Li, and T. Kirubarajan, Estimation with Applications to Tracking and Navigation. Hoboken, NJ: Wiley, 2001.
+[10] ArduPilot, “MOT_SLEWRATE: Motor Output Slew Rate.” Available: https://ardupilot.org/copter/docs/parameters.html#mot-slewrate-motor-output-slew-rate (accessed Oct. 2025).
+[11] PX4 Dev Team, “Actuators / Output Configuration (output limiting, mixers).” Available: https://docs.px4.io/main/en/config/actuators.html (accessed Oct. 2025).
+[12] S. Shah et al., “AirSim: High-fidelity visual and physical simulation for autonomous vehicles,” arXiv:1705.05065, 2017.
+
+III. 방법/시스템 구현(methods/system)
+    [다이어그램1 - AirSim ↔ Virtual FC 구조: Mahony 자세추정기(Adaptive gains, EMA), Attitude P → Rate PI+D(D: PT2×2, clamp), Controller(400 Hz), EST/GT 블렌딩, Trim ramp-in]
+    그림 1. AirSim-xsim-Virtual FC 블록도. 텔레메트리(~1 kHz)와 PWM(400 Hz) 경로, Mahony 자세추정기(Adaptive gains, EMA), Attitude P → Rate PI+D(D: PT2×2, clamp ±12 μs), EST/GT 블렌딩(τ≈0.25 s), 트림 램프-인(3 s→0.8 s, ±50 μs).
+
+ 시스템 개요
+  AirSim-xsim 공유메모리(IPC)로 컨트롤러를 연결해 타임스탬프가 포함된 텔레메트리를 약 1 kHz로 소비하고, PWM 명령을 400 Hz로 송신한다. 단일생산자-단일소비자(SPSC) 링버퍼와 비블로킹 소비, zero-copy 경로, 고해상도 시계 동기화를 통해 센서→제어 지연과 주기 지터를 줄였다. 추정/제어 스레드의 우선순위를 상향해 고주파 폐루프의 안정성을 확보했다. 기호: q(자세 쿼터니언), ex/ey(소각오차), wx_ref/wy_ref(각속도 참조). Virtual FC의 Sensors는 ACC, GYRO만 사용(추정기 관점; MAG/BARO 미사용).
+
+ 상태추정기
+  Mahony 보완필터 기반으로 쿼터니언 자세 q를 추정한다. 각 샘플의 타임스탬프로 가변 Δt를 계산해 적분하며, 매 스텝 q를 정규화한다. 가속도 신뢰도는 크기 편차 |‖a‖−g|가 작을 때만 보정에 사용하고, kp·ki는 ∥a∥ 근접도에 따라 명령치를 정한 뒤 시간상수(τ) 기반 EMA로 스무딩해 게인 계단을 방지한다. 정지/저속 구간에서는 자이로 바이어스를 저속 EMA로 온라인 추정해 장기 드리프트를 억제한다. (상세 임계·상수는 IV 절 참조)
+
+ 제어기(Attitude P → Rate PI+D, yaw rate-PI)
+  외부 루프는 쿼터니언 소각오차(ex, ey)에 데드존을 적용한 뒤 각속도 참조(wx_ref, wy_ref)를 만든다. 내부 루프는 각속도 PI에 조건부 적분·적분 한계(anti-windup)를 적용한다. D-term은 바이어스 보정 자이로율을 입력으로 2단 PT2 저역통과를 거친 후 타이트 클램프를 적용해 스파이크를 억제한다. yaw 축은 angle-P=0의 rate-PI(필요 시 소량 D 병행)로 0(rad/s) 수렴을 우선한다. (세부 한계값은 IV 절)
+
+ 트림(hover bias) 램프-인
+  이륙 초기 관측 윈도우에서 ex/ey 평균 바이어스를 추정해 각도→출력 변환 후 한계로 포화한 목표 트림을 산출한다. 적용은 선형 램프-인으로 수행해 계단 적용에 따른 과도 킥을 방지한다. 트림은 믹서 이전 단계에서 롤/피치 보정에 더해지며, 램프-인 완료 후 고정된다. (관측 시간, 램프-인 시간, 한계 및 변환계수는 IV 절)
+
+ EST/GT 소스 블렌딩
+  추정(EST)과 GT 소스 전환은 이산 스위치 대신 연속 가중(gt_blend)으로 처리한다. 안전/품질 조건을 만족하면 GT 가중을 상승시키고, 해제 시 1차 EMA로 연속 복귀시켜 단계 전이를 제거한다. 최종 제어 오차는 ex=(1−gt_blend)·ex_est+gt_blend·ex_gt, ey도 동일하게 합성한다. (임계와 시간상수는 IV 절)
+  
+IV. 실험 설정(experimental setup)
+환경(Environment)
+AirSim-xsim 공유메모리 IPC로 컨트롤러와 시뮬레이터를 연결한다. 텔레메트리는 ~1 kHz(타임스탬프 포함) 비블로킹 소비, PWM 명령은 400 Hz 송신으로 고주파 폐루프를 구성한다. 고해상도 시계 동기화와 링버퍼를 사용해 지연·지터를 최소화한다.
+소프트웨어/플랫폼
+Windows 10, AirSim(동일 월드/기체 파라미터 고정), 컨트롤러는 XSimIo 기반 공유메모리 IPC 구현을 사용한다. 스레드 우선순위를 상향하고 타이머 분해능을 1 ms로 설정한다.
+테스트 케이스(Scenarios)
+S1-Hover: 이륙(1800 μs, 7 s) 후 호버(1600 μs)에서 바이어스 관측 및 제어(기본 바이어스 예: FR+1, RL+3, FL+5, RR+6 μs).S2-Gyro Bias: z-rate에 상수 바이어스(예: ±0.02-0.05 rad/s) 주입.S3-Dynamic Accel: 사인/스텝 외란(0.3-0.8 g, 0.5-2 Hz) 적용.S4-Aggressive Tilt: 빠른 롤/피치 스텝 참조로 과도 응답 확인.
+비교군(Configurations)
+Baseline: D-term PT1(또는 단일 LPF), 트림 즉시 적용(램프-인 없음), 게인 계단 전환, Slew 8 μs, yaw D 중심.Proposed: D-term PT2(2단) + 타이트 클램프(±12 μs), 트림 3 s 관측→0.8 s 램프-인, Mahony 게인 스무딩(τ≈0.35 s), EST/GT 연속 블렌딩(τ≈0.25 s), Slew 4 μs, yaw rate-PI(anti-windup).
+실험 프로토콜(Protocol)
+각 시나리오당 N=20 반복, 초기 높이·자세·시드 고정. 이륙 구간 제외 후 분석 윈도우(예: 30-120 s)를 사용한다. Warm-up 5 s를 버리고 통계 산출한다.
+지표 정의(Metrics)
+Peak-to-Peak(μs): 모터 명령의 최대-최소.포화율(%): [≤1002, ≥1998] μs 구간 점유 시간 비율.Attitude RMS/95th(deg): 롤/피치 오차.Steady Yaw-Rate(rad/s): |ωz|의 평균 및 95th.cp/cr(μs): pitch/roll 보정 크기(절대값 평균).cy(μs): yaw 제어 출력 평균 및 분산.지연/지터(ms): 텔레메트리 Δt, PWM 주기 히스토그램/박스플롯.
+파라미터(고정/튜닝)
+제어: ANG_P_R/P, roll/pitch(Kp, Ki, I-limit), yaw(Ki, I-limit, Kd), deadzone.필터: PT2 알파(2단), D-클램프(±12 μs).램프/블렌딩: 트림 관측 3 s·램프-인 0.8 s·한계 ±50 μs, GT 게이팅 임계 5°/5°, 블렌딩 τ≈0.25 s.Slew: 4 μs/스텝(민감도 테스트 시 6-8 μs로 스윕).
+통계 처리(Statistics)
+평균±표준편차와 95% CI를 보고한다. Baseline vs Proposed는 페어 비교(필요 시 비모수 검정)로 유의성 확인, 효과크기(Cohen’s d) 병기.
+데이터 수집/로깅(Logging)
+요약(10 Hz): 모터 명령, est/gt Euler(r,p,y), yaw[rate, cy], cp/cr, 포화 플래그.진단(옵션 50 Hz): est vs gt 쿼터니언 오차, ex/ey(est/gt), gt_blend 가중, P/I/D 분해, 믹스 평균.
+안전/게이팅(Safety/Gating)
+est-gt 오차>5° 또는 큰 롤/피치 시 GT 가중을 일시 상승, 해제 시 블렌딩으로 천이. 포화 지속 시 적분 리셋/프리즈와 Slew 우선 적용.
+재현성(Reproducibility)
+코드 커밋 해시, 파라미터 파일, 실행 스크립트, 로그 경로/명명 규칙을 명시한다. 실험 스윕(시나리오×구성×반복) 자동화 스크립트를 제공한다.
+
+% 표 1: 핵심 파라미터 (LaTeX 표)
+\begin{table}[htb]
+\centering
+\caption{핵심 파라미터(예시) — 상세 근거는 IV 절 참조}
+\begin{tabular}{ll}
+\hline
+항목 & 값 \\
+\hline
+EST/GT 임계 & 5$^\circ$ (쿼터니언 오차 또는 $|$roll$|$/$|$pitch$|$) \\
+블렌딩(EMA) & $\tau\!\approx\!0.25$ s, $\alpha_{\max}=0.25$ \\
+Attitude 데드존 & 0.005 rad \\
+D-클램프 & $\pm 12\,\mu s$ (gyro D-term) \\
+Trim(관측/램프/한계) & 3 s / 0.8 s / $\pm 50\,\mu s$ \\
+각도→출력 계수 & 80 $\mu s/\mathrm{rad}$ \\
+Slew 제한 & 4 $\mu s$/step \\
+\hline
+\end{tabular}
+\label{tab:key_params}
+\end{table}
+
+% 표 2: 섹션 IV 수치 교차참조 (LaTeX 표)
+\begin{table}[htb]
+\centering
+\caption{섹션 IV 수치 교차참조(사용 위치)}
+\begin{tabular}{ll}
+\hline
+수치 & 사용 위치 \\
+\hline
+5$^\circ$ 임계 & III-EST/GT 블렌딩; IV-파라미터/안전 \\
+$\tau\!\approx\!0.25$ s & III-EST/GT 블렌딩; IV-파라미터 \\
+0.005 rad 데드존 & III-제어기; IV-파라미터 \\
+$\pm 12\,\mu s$ D-클램프 & III-제어기; IV-파라미터 \\
+3 s / 0.8 s / $\pm 50\,\mu s$ & III-트림; IV-파라미터 \\
+80 $\mu s/\mathrm{rad}$ & III-트림; IV-파라미터 \\
+4 $\mu s$/step Slew & III-제어기/보호; IV-파라미터 \\
+\hline
+\end{tabular}
+\label{tab:cross_ref}
+\end{table}
+
+V. 결과 및 어블레이션(results & ablations)
+VI. 토의(discussion: 한계/의미/실무가치)
+VII. 결론(conclusion)
+참고문헌
+부록/재현성: Appendix A/B로 표기 권장 (번호 대신 Appendix)
+

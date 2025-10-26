@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <sstream>
 #include <cmath>
-#include <string>
 
 #include "x_xsim.h"
 #include "lib/LogHelper.hpp"
@@ -34,9 +33,6 @@
 #endif
 
 static const int PWM_TX_HZ = 400;
-
-// Summary log prefix (scenario tag shown in 10 Hz lines)
-static std::string g_summary_prefix = "hover_bias";
 
 // Scenario: forward → right → back → left tilt sequence once
 static void scenario_cardinal_tilt(XSimIo& io, LogHelper& logger)
@@ -189,7 +185,7 @@ static void scenario_all_1600(XSimIo& io, LogHelper& logger)
 }
 
 // Scenario: 3s takeoff at 1800us, then hover with rotor4 bias +1us
-static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger, int max_duration_ms = -1)
+static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger)
 {
     RotorWriter writer(io.handle());
     auto period = std::chrono::microseconds(1000000 / PWM_TX_HZ);
@@ -671,7 +667,7 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger, int max_d
                        << " est[r p y]= " << roll_deg << " " << pitch_deg << " " << yaw_deg
                        << " gt[r p y]= " << gt_r << " " << gt_p << " " << gt_y;
                 } else {
-                    os << g_summary_prefix << " fr+" << BIAS_FR << " rl+" << BIAS_RL << " fl+" << BIAS_FL << " rr+" << BIAS_RR
+                    os << "hover_bias fr+" << BIAS_FR << " rl+" << BIAS_RL << " fl+" << BIAS_FL << " rr+" << BIAS_RR
                        << " mix[FR RL FL RR]= " << r1 << " " << r2 << " " << r3 << " " << r4
                        << " est[r p y]= " << roll_deg << " " << pitch_deg << " " << yaw_deg
                        << " gt[r p y]= " << gt_r << " " << gt_p << " " << gt_y
@@ -681,30 +677,9 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger, int max_d
                 logger.logText(os.str());
             }
             next_tp += period;
-            if (max_duration_ms > 0 && elapsed_ms >= max_duration_ms) {
-                break; // end scenario after specified duration
-            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-}
-
-static void run_all(XSimIo& io, LogHelper& logger)
-{
-    // Per scenario duration (ms): include 7s takeoff + 3.8s trim + 90s window margin
-    const int SCEN_MS = 130000; // ~130 s
-    // S1: Hover-bias
-    g_summary_prefix = "hover_bias";
-    scenario_takeoff_hover_bias(io, logger, SCEN_MS);
-    // S2: Gyro Bias (reuse same loop; tag only)
-    g_summary_prefix = "gyro_bias";
-    scenario_takeoff_hover_bias(io, logger, SCEN_MS);
-    // S3: Dynamic Accel (tag only)
-    g_summary_prefix = "dyn_accel";
-    scenario_takeoff_hover_bias(io, logger, SCEN_MS);
-    // S4: Aggressive Tilt (tag only)
-    g_summary_prefix = "agg_tilt";
-    scenario_takeoff_hover_bias(io, logger, SCEN_MS);
 }
 
 int main()
@@ -730,8 +705,16 @@ int main()
 		return 1;
 	}
 
-    // Run all scenarios in a single execution (batch mode)
-    run_all(io, logger);
+    // run selected scenario (extensible)
+#if TEST_SCENARIO == SCENARIO_CARDINAL_TILT
+    scenario_cardinal_tilt(io, logger);
+#elif TEST_SCENARIO == SCENARIO_ALL_1600
+    scenario_all_1600(io, logger);
+#elif TEST_SCENARIO == SCENARIO_TAKEOFF_HOVER_BIAS
+    scenario_takeoff_hover_bias(io, logger);
+#else
+#error Invalid TEST_SCENARIO selected
+#endif
 	timeEndPeriod(1);
 	return 0;
 }
