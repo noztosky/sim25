@@ -24,22 +24,11 @@
 \usepackage{caption} % 캡션 간격/서식 제어
 \usepackage{listings} % 코드 블록(자동 줄바꿈)
 \usepackage{float} % [H] 고정 배치를 위한 패키지
-\usepackage{dblfloatfix} % 두 단(bottom) 플로트 허용
 \usepackage{newunicodechar} % 유니코드 하이픈 대체
 \usepackage{etoolbox} % 환경 진입 훅(표 전역 글자 크기 설정)
-% 용지/여백 설정 (사용자 정의 210x280mm, 위20/아래15/좌우20, 머리말 간격 15, 제본 0)
-\usepackage[
-  paperwidth=210mm,
-  paperheight=280mm,
-  top=20mm,
-  bottom=15mm,
-  left=20mm,
-  right=20mm,
-  headsep=15mm,
-  bindingoffset=0mm
-]{geometry}
-% 두 단 분리 시 각 단 너비 8 cm가 되도록 columnsep=10 mm (textwidth=170 mm 기준)
-\setlength{\columnsep}{10mm}
+% 여백/단폭 설정
+\usepackage[a4paper,top=22mm,bottom=22mm,left=18mm,right=18mm]{geometry}
+\setlength{\columnsep}{8mm}
 % siunitx v3: replace deprecated detect-all
 \sisetup{
   mode = match,
@@ -70,7 +59,7 @@
 \newunicodechar{–}{-} % U+2013 (en dash -> ASCII hyphen)
 
 % 제목 크기(폰트) 축소: 섹션/소섹션을 본문 크기로 맞춤
-\titleformat{\section}{\bfseries\fontsize{12}{21.6}\selectfont\filcenter}{\thesection.}{0.5em}{}
+\titleformat{\section}{\bfseries\large}{\thesection.}{0.5em}{}
 \titleformat{\subsection}{\bfseries\normalsize}{\thesubsection.}{0.5em}{}
 \titleformat{\subsubsection}{\bfseries\small}{\thesubsubsection.}{0.5em}{}
 
@@ -78,7 +67,7 @@
 \setlist[itemize]{noitemsep, topsep=0.4ex, leftmargin=1.4em}
 \setlist[enumerate]{noitemsep, topsep=0.4ex, leftmargin=1.4em}
 % 그림 캡션과 본문(그림) 간격 축소
-\captionsetup[figure]{skip=2pt, name=Fig., labelsep=period}
+\captionsetup[figure]{skip=2pt}
 % 리스트 코드 캡션 좌측 정렬
 \captionsetup[lstlisting]{singlelinecheck=false, justification=raggedright}
 % 코드 기본 설정: 작은 폰트, 자동 줄바꿈, 고정폭, 여백 최소화
@@ -98,33 +87,23 @@
 
 % 간단 키워드 매크로
 \newcommand{\keywords}[1]{\par\noindent\textbf{키워드—} #1}
- % 제목 위 14pt 한줄(사용자 지정 문구). 비우면 출력되지 않음
-\newcommand{\TitleTopLine}{}
- % 제목 아래 10pt 한줄(예: 저자명 등). 비우면 출력되지 않음
-\newcommand{\TitleSubLine}{}
-% 비어 있어도 고정 높이를 확보하는 박스
-\newcommand{\TitleTopLineBox}{\noindent\parbox{\textwidth}{\centering{\fontsize{14}{22.4}\selectfont \rule{0pt}{22.4pt}\TitleTopLine}}}
-\newcommand{\TitleSubLineBox}{\noindent\parbox{\textwidth}{\centering{\fontsize{10}{16}\selectfont \rule{0pt}{16pt}\TitleSubLine}}}
-% 영문 제목 아래 10pt, 160% 줄간(=16pt) 빈 줄
-\newcommand{\EngTitleSpacer}{\noindent\parbox{\textwidth}{\centering{\fontsize{10}{16}\selectfont \rule{0pt}{16pt}}}}
-% 저자명: 11pt, line-height 190% (=20.9pt), 세로 중앙 정렬 (옵션 대괄호 불사용)
-\newcommand{\AuthorLine}[1]{\noindent\vbox to 20.9pt{\vfil{\centering{\fontsize{11}{20.9}\selectfont #1}\par}\vfil}}
-% 재사용 가능한 저자 정보 박스(어디서든 호출 가능)
-\newcommand{\AuthorInfoBox}{%
-  \noindent\fbox{\begin{minipage}{\columnwidth}\footnotesize
-    Received: Mo \#\#, Year \quad Revised: Mo \#\#, Year \quad Accepted: Mo \#\#, Year\par
-    \textsuperscript{1}Principal Research Engineer, \textsuperscript{2}Senior Research Engineer, \textsuperscript{3}Professor\par
-    \textdagger\ Corresponding Author\par
-    Tel: +82-\#\#-\#\#\#\#-\#\#\#\#, E-mail: ABCD@sase.or.kr\par
-    ORCID: \#\#\#\#-\#\#\#\#-\#\#\#\#-\#\#\#\#\par
-    Copyright \textcopyright\ The Society for Aerospace System Engineering
-  \end{minipage}}%
-}
-% 현재 왼쪽 단 하단에 배치하는 헬퍼
-\newcommand{\AuthorInfoBottomLeft}{\vspace*{\fill}\AuthorInfoBox}
-% Figure reference helpers: sentence-begin vs in-text
-\newcommand{\Figure}[1]{Figure~#1}
-\newcommand{\Fig}[1]{Fig.~#1}
+
+% JASE 스타일: 제목/저자/소속/라벨 글자 크기 통일
+% - 한글 제목: 14/16pt, 영문 제목: 12/14pt
+% - 저자: normalsize(10pt), 소속: footnotesize(8pt)
+% - 라벨(Abstract/초록/Key Words): 굵은 10pt
+\newcommand{\JASEKTitle}[1]{{\bfseries\fontsize{16}{18}\selectfont #1}}
+\newcommand{\JASEETitle}[1]{{\bfseries\fontsize{14}{16}\selectfont #1}}
+\newcommand{\JASEAuthors}[1]{{\fontsize{10}{12}\selectfont #1}}
+\newcommand{\JASEAffil}[1]{{\fontsize{8}{9.5}\selectfont #1}}
+\newcommand{\JASELabel}[1]{{\bfseries\fontsize{10}{12}\selectfont #1}}
+\newcommand{\JASECenterLabel}[1]{{\centering \JASELabel{#1} \par}}
+% 교신저자 박스 매크로
+\newcommand{\JASECorrBox}[1]{\noindent\fbox{\begin{minipage}{0.42\columnwidth}\footnotesize
+\textdagger\ 교신저자 (Corresponding Author)\\[2pt]
+E-mail: #1\\[2pt]
+Copyright \textcopyright\ The Society for Aerospace System Engineering
+\end{minipage}}}
 
 \title{AirSim 연동 고주파 제어 벤치마크·안정화 툴킷\\
 AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}
@@ -136,45 +115,39 @@ AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}
 % JASE-style title/abstract block spanning both columns
 \twocolumn[
 \vspace*{-4mm}
-\noindent\begin{tabular*}{\textwidth}{@{}l@{\extracolsep{\fill}}r@{}}
-  {\fontsize{11}{13}\selectfont Research Paper} & {\fontsize{9}{11}\selectfont EISSN\,2508-7150} \\
-  {\fontsize{10}{12}\selectfont\itshape Journal of Aerospace System Engineering} & {\fontsize{9}{11}\selectfont http://dx.doi.org/10.20910/JASE.\#\#\#\#.\#\#.\#\#} \\
-  {\fontsize{10}{12}\selectfont Vol.\#, No.\#, pp.\#-\# (20\#\#)} & \\
-\end{tabular*}
+\noindent\makebox[0.5\textwidth][l]{\scriptsize }% left empty slot
+\makebox[0.5\textwidth][r]{\scriptsize EISSN 2508-7150}\\
+\noindent\makebox[0.5\textwidth][l]{\footnotesize\itshape Journal of Aerospace System Engineering}%
+\makebox[0.5\textwidth][r]{\footnotesize http://dx.doi.org/10.20910/JASE/\#\#\#\#.\#\#.\#\#}\\
 \rule{\textwidth}{0.4pt}
+\vspace{\baselineskip}
 {\centering
-\TitleTopLineBox\par\vspace{2pt}
-{\fontsize{14.4}{14.4}\selectfont \bfseries AirSim 연동 고주파 제어 벤치마크·안정화 툴킷}\par
-\TitleSubLineBox\par\vspace{2pt}
-\AuthorLine{김경목\textsuperscript{1\textdagger}· 이남훈\textsuperscript{2}· 김성권\textsuperscript{3}}\par
-{\fontsize{10}{12}\selectfont \textsuperscript{1}\, 서울과학기술대학교}\par
-{\fontsize{10}{12}\selectfont \textsuperscript{2}\, 서울과학기술대학교}\par
-{\fontsize{10}{12}\selectfont \textsuperscript{3}\, 서울과학기술대학교}\par\vspace{4pt}
-{\large \bfseries AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}\par
-\EngTitleSpacer\par
-\AuthorLine{Kyungmok Kim\textsuperscript{1\textdagger}· Namhoon Lee\textsuperscript{2}· Seongkwon Kim\textsuperscript{3}}\par
-{\fontsize{10}{12}\selectfont \textsuperscript{1}\, Seoul National University of Science and Technology}\par
-{\fontsize{10}{12}\selectfont \textsuperscript{2}\, Seoul National University of Science and Technology}\par
-{\fontsize{10}{12}\selectfont \textsuperscript{3}\, Seoul National University of Science and Technology}\par
+\JASEKTitle{AirSim 연동 고주파 제어 벤치마크·안정화 툴킷}\par\vspace{2pt}
+\JASEAuthors{김경목$^{1\dagger}$\,\, 이남훈$^{2}$\,\, 김성권$^{2}$}\par\vspace{2pt}
+\JASEAffil{$^{1}$교신저자 소속(예시)}\par
+\JASEAffil{$^{2}$공동저자 소속(예시)}\par\vspace{4pt}
+\JASEETitle{AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}\par\vspace{2pt}
 }
-\vspace{5pt}
-{\centering{\fontsize{10}{12}\selectfont\bfseries Abstract}\par}
-\vspace{12pt}
-{\fontsize{10}{12}\selectfont\ \ We present a high-rate simulation–control loop that connects AirSim to an external Software‑in‑the‑Loop (SIL) controller through an in-process shared-memory pipeline. AirSim publishes timestamped high‑rate sensor streams (kHz‑class inertial, 100‑Hz‑class environmental and GNSS) to a lock‑free ring buffer; the SIL controller consumes the streams, runs an attitude‑P / rate‑PI+D controller, and returns PWM 400 Hz on the same path. Compared with RPC-based integration, the pipeline sustains target rates and markedly lowers latency and jitter. Under injected motor/gyro biases and dynamic accelerations, the loop reduces peak‑to‑peak spikes and saturation occupancy, achieves yaw stop (rate→0), and improves attitude RMS. Because the SIL controller mirrors onboard FC structure, algorithms validated in AirSim transfer with minimal code changes. The result is a practical recipe and reference implementation for simulator and HIL development where high‑frequency sensing and actuation are essential.\par}\vspace{4pt}
-{\centering{\fontsize{10}{12}\selectfont\bfseries 초\hspace{2em}록}\par}
-\vspace{12pt}
-{\fontsize{10}{12}\selectfont\ \ 본 논문은 AirSim과 소프트웨어‑인‑더‑루프(SIL) 제어기를 프로세스 내 공유메모리로 직결한 고속 센싱·제어 폐루프를 제시한다. AirSim은 타임스탬프 기반의 고속 관성·환경·위치 센서를 링버퍼로 제공하고, SIL 제어기는 이를 소비해 자세‑P/율‑PI+D를 수행한 뒤 로터 구동 PWM을 동일 경로로 반환한다. RPC 대비 지연·지터가 감소하며 목표 주파수를 안정 유지한다. 모터/자이로 바이어스·동적 가속 환경에서 p2p·포화율이 줄고 yaw 정지(rate→0)와 자세 RMS가 개선되며, 구조가 실기체 FC와 동일해 최소 변경 이식이 가능하다.\par}\vspace{12pt}
-\noindent\textbf{Key Words:} AirSim, shared-memory pipeline, Software‑in‑the‑Loop (SIL), virtual flight controller, high-rate sensing, attitude control, latency/jitter reduction
+\vspace{-1mm}
+\noindent\rule{\textwidth}{0.4pt}
+\JASECenterLabel{Abstract}
+We present a shared-memory pipeline between AirSim and an external Virtual Flight Controller (FC) that enables high-rate sensing and control with direct transfer to onboard FCs. AirSim publishes IMU 1000 Hz, barometer 100 Hz, magnetometer 100 Hz, and GNSS position 10 Hz into an in-process ring buffer; the Virtual FC consumes these streams, runs an attitude P and rate PI+D controller, and returns PWM at 400 Hz through the same shared-memory path. Compared to RPC, the pipeline reduces latency and jitter and sustains the target rates. In experiments with injected motor/gyro biases and dynamic accelerations, the system reduces peak-to-peak spikes and saturation occupancy, achieves yaw stop (rate→0), and improves attitude RMS. The architecture mirrors FC software structure, allowing methods validated in simulation to be moved to the flight controller with minimal changes. This work contributes a practical, high-frequency AirSim–FC loop and a stabilization recipe that is immediately useful for simulator and HIL development.\par\vspace{4pt}
+\JASECenterLabel{초록}
+AirSim–Virtual FC 간 공유메모리 파이프라인으로 고율 센싱·제어와 FC 직이식을 달성한다. AirSim은 IMU 1000 Hz, Baro 100 Hz, Mag 100 Hz, GNSS 10 Hz를 게시하고, Virtual FC는 이를 소비해 자세 P–각속도 PI+D를 수행한 뒤 PWM 400 Hz를 반환한다. RPC 대비 지연·지터를 낮추고 목표 주파수를 안정 유지한다. 모터/자이로 바이어스와 동적 가속 조건에서 피크‑투‑피크·포화 점유율이 감소하고 yaw 정지(rate→0), 자세 RMS가 개선됐다. 구조가 실제 FC와 동일해 시뮬레이터 검증을 최소 변경으로 기체에 이식 가능하다.\par\vspace{2pt}
+\noindent\JASELabel{Key Words}: Multirotor, attitude control, D-term filtering, anti-windup, estimator smoothing, shared-memory IPC, AirSim
+\par\vspace{2pt}\noindent\rule{\textwidth}{0.4pt}
+% 교신저자 박스 (첫 페이지 상단 영역에서 작게 표시)
+\vspace{2pt}
+\JASECorrBox{ABCD@sase.or.kr}
 \vspace{4mm}
 ]
 
-\section{서\hspace{2.0em}론}
-\ \ 소형 멀티로터의 자세 제어는 모터/기체 비대칭, 센서 바이어스, 추정기 게인 스위칭 등으로 출력 스파이크와 장기적 yaw 드리프트가 빈번하다. 본 연구는 AirSim과 소프트웨어‑인‑더‑루프(SIL) 제어기를 프로세스 내 공유메모리 파이프라인으로 직결하여, 타임스탬프 IMU 1000 Hz와 기압(Barometer) 100 Hz·자기(Magnetometer) 100 Hz·
-\AuthorInfoBottomLeft
-GNSS(위치) 10 Hz의 센서 스트림을 소비하고, ESC/로터에 전달되는 PWM(로터 구동 명령) 400 Hz를 생성하는 고속 센싱·제어 폐루프를 제안한다.
-제안 루프는 SIL 제어기에 자세‑P/율‑PI+D 제어기를 배치하고, (i) yaw rate‑PI(anti‑windup), (ii) 자이로 D‑term PT2×2+클램프, (iii) 호버 트림 추정 후 램프‑인, (iv) Mahony 가속도 신뢰도 게인 스무딩, (v) EST/GT 연속 블렌딩, (vi) 모터 Slew 제한을 결합한다.
-RPC 기반 통합 대비 본 파이프라인은 지연·지터를 낮추면서 목표 주파수를 안정 유지하고, 모터/자이로 바이어스·동적 가속 조건에서 peak‑to‑peak와 포화율을 감소, yaw 정지(rate→0)와 자세 RMS를 개선한다. 또한 SIL 제어기가 실제 FC 구조를 반영하므로 시뮬레이터에서 검증한 알고리즘을 최소 변경으로 실기체에 이식 가능하다.
-AirSim, Gazebo 등에서 PID/필터/튜닝 연구는 다수 보고되었으나, AirSim↔공유메모리↔SIL 제어기로 고속 센싱·제어(IMU 1000 Hz, Baro/Mag 100 Hz, GNSS 10 Hz, PWM 400 Hz)를 일관 유지하며 RPC와 정량 비교(지연/지터, p2p, 포화율, yaw‑rate, RMS)를 제시한 공개 사례는 제한적이다 [12].
+\section{서론}
+소형 멀티로터의 자세 제어는 모터/기체 비대칭, 센서 바이어스와 고주파 노이즈, 추정기 게인의 상황별 스위칭 등 실환경 요인으로 인해 출력 스파이크(“팅김”)와 장기적 yaw 드리프트가 빈번하게 발생한다. 본 연구는 AirSim 내부 Shared Memory를 사용해 약 1 kHz 텔레메트리와 400 Hz PWM으로 구성된 고주파 폐루프를 구현하고, 필터링·스무딩·anti-windup·출력 제약을 충돌 없이 결합하여 제어입력의 연속성과 고주파 강인성을 달성한다.
+
+개별 기법의 도입이 아니라, 고주파 공유메모리 폐루프 맥락에서 Trim 램프-인, EST/GT 연속 블렌딩, PT2 D(타이트 클램프), 모터 Slew, yaw rate-PI(anti-windup)를 충돌 없이 동시에 결합했다. 또한 “한 번씩 튀는” 스파이크의 원인을 D 고주파 성분과 Trim/게인 계단 적용의 합성효과로 분해하고, PT2+클램프·Trim 램프-인·게인 스무딩 결합이 제어입력 연속성을 회복함을 어블레이션과 정량 지표로 증명한다. 마지막으로 AirSim 내부 Shared Memory로 지연/지터를 낮춘 상태에서 재현 가능한 고주파 벤치마크 프로토콜을 제시한다.
+
+AirSim, Gazebo 등 시뮬레이터와 HIL 환경에서 PID/필터/튜닝 연구가 다수 보고되었다. 그러나 AirSim과 컨트롤러를 공유 메모리 IPC로 직결해 약 1 kHz 텔레메트리와 400 Hz PWM의 고주파 폐루프를 운용하고, Trim 램프-인·EST/GT 블렌딩·PT2 D+클램프+Slew를 동시에 적용해 어블레이션과 정량 지표(peak-to-peak, 포화율, yaw-rate, cp/cr, cy)로 효과를 비교한 공개 사례는 제한적이다 [12].
 
 % 관련 연구(섹션 2)에서만 서브섹션 제목-본문 간격을 0으로 축소
 \titlespacing*{\subsection}{0pt}{0.6ex plus .1ex minus .1ex}{0ex}
@@ -242,7 +215,7 @@ AirSim-xsim 공유메모리(IPC)로 컨트롤러를 연결해 타임스탬프 �
 
 \end{tikzpicture}%
 }
-\caption{AirSim–Virtual FC block diagram.}\label{fig:airsim_vfc}
+\caption{AirSim-Virtual FC 블록도.}
 \end{figure}
 
 
