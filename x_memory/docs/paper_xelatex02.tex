@@ -202,7 +202,7 @@ ArduPilot과 PX4는 외부 자세 제어 루프(P)와 내부 각속도 제어 �
 
 \section{방법/시스템 구현}
 \subsection{시스템 개요}
-AirSim–공유메모리–SIL 제어기 구조로 연결해 타임스탬프 텔레메트리를 약 1 kHz로 소비하고 PWM을 400 Hz로 송신한다. SPSC 링버퍼, 비블로킹 소비, zero-copy, 고해상도 시계 동기화로 지연/지터를 줄인다. 기호: $q$(자세 쿼터니언), $e_x,e_y$(소각오차), $\omega_{x,\mathrm{ref}},\omega_{y,\mathrm{ref}}$(각속도 참조).
+본 시스템은 AirSim–공유 메모리–SIL 제어기로 구성된 파이프라인을 통해 타임스탬프가 부여된 텔레메트리 스트림을 약 1 kHz로 수신하고, PWM 구동 명령을 400 Hz로 송신하도록 설계하였다. 단일 생산자–단일 소비자(SPSC) 링버퍼 구조, 비블로킹 소비(non-blocking consume), zero-copy 전달, 고해상도 시계(high-resolution clock) 동기화를 적용하여 통신 지연과 지터를 최소화하였다. 본 논문에서 사용하는 기호는 다음과 같다: $q$는 자세 쿼터니언, $e_x, e_y$는 소각 오차(small-angle attitude error), 그리고 $\omega_{x,\mathrm{ref}}, \omega_{y,\mathrm{ref}}$는 각속도 참조 신호를 각각 나타낸다.
 
 \begin{figure}[H]
 \centering
@@ -214,20 +214,23 @@ AirSim–공유메모리–SIL 제어기 구조로 연결해 타임스탬프 텔
   arrow/.style={-{Latex[length=2.5mm]}, very thick},
   box/.style={draw, rounded corners, fill=yellow!20, inner sep=6pt}
 ] 
+% Fixed invisible canvas to lock overall diagram size (matching current extents)
+% Coordinates in cm: left/right = \pm5.5, top = 1.05, bottom = -8.6
+\path[use as bounding box] (-5.5,-8.6) rectangle (5.5,1.05);
 % Row layout using a simple fixed grid to avoid overlaps
 % Row 1: AirSim
 \node[box, minimum width=11cm, minimum height=2.1cm] (airsim) at (0,0) {};
-\node at (0,0.78) {\Large AirSim};
+\node at (0,0.6) {\Large AirSim};
 % Attach child nodes near the bottom of AirSim box
-\node[node] (as_sens) at (-2.5,0.30) {Sensors\\ACC, GYRO};
-\node[node] (as_pwm)  at ( 2.5,0.30) {ROTOR\\PWM};
+\node[node] (as_sens) at (-2.5,-0.30) {Sensors\\ACC, GYRO, BARO, MAG};
+\node[node] (as_pwm)  at ( 2.5,-0.30) {ROTOR\\PWM};
 % OS-level shared memory placed between AirSim and SIL
-\node[node, minimum width=8.0cm] (shm) at ( 0,-2.40) {Shared Memory (OS)};
+\node[node, minimum width=8.0cm] (shm) at ( 0,-1.75) {Shared Memory (OS)};
 
 % Row 3: Virtual FC
 \node[box, minimum width=11cm, minimum height=6.2cm] (vfc) at (0,-5.5) {};
 \node[anchor=north west] at ($(vfc.north west)+(4.2,-0.2)$) {\Large SIL Controller};
-\node[node,     minimum width=5.0cm]    (fc_sens)   at (-2.3,   -3.9) {Sensors\\ACC, GYRO};
+\node[node,     minimum width=5.0cm]    (fc_sens)   at (-2.3,   -3.9) {Sensors\\ACC, GYRO, BARO, MAG};
 \node[small,    minimum width=5.0cm]    (mahony)    at (-2.3,   -5.2) {Mahony 자세 추정기\\\scriptsize Adaptive gains (EMA)};
 \node[node,     minimum width=5.0cm]    (attP)      at (-2.3,   -6.5) {Attitude P};
 \node[small,    minimum width=5.0cm]    (ratepid)   at (-2.3,   -7.8) {Rate PI + D\\\scriptsize D: PT2$\times$2, clamp $\pm$12 $\mu$s};
@@ -248,16 +251,14 @@ AirSim–공유메모리–SIL 제어기 구조로 연결해 타임스탬프 텔
 \caption{AirSim–Shared Memory–SIL block diagram.}\label{fig:airsim_sil}
 \end{figure}
 
-
-
-\subsection{AirSim 센서(ACC, GYRO)}
-AirSim의 가속도/자이로 센서는 OS 공유메모리(IPC) 세그먼트에 write(\emph{producer})로 기록되며, 각 레코드는 지연을 최소화하기 위해 고해상도 타임스탬프를 포함한다.
+\subsection{AirSim 센서(ACC, GYRO, BARO, MAG)}
+AirSim의 가속도계(accelerometer)와 자이로스코프(gyroscope) 센서는 운영체제(OS)의 공유 메모리(IPC) 세그먼트에 \emph{producer} 역할로 데이터를 기록하며, 각 레코드는 지연(latency)을 최소화하기 위해 고해상도 타임스탬프(high-resolution timestamp)를 포함한다. 또한 기압계(barometer)와 자기계(magnetometer) 데이터 역시 동일한 방식으로 송출되어, SIL 제어기 측에서 일관된 시각 기준으로 소비된다.
 
 \subsection{Shared Memory (OS IPC)}
-SPSC 링버퍼, 비블로킹 접근, zero-copy, 고해상도 시계 동기화를 적용해 약 1 kHz 텔레메트리를 안정적으로 제공한다. write/read 역할은 \emph{producer}=AirSim(IMU write), \emph{consumer}=SIL 제어기(IMU read)로 구분되며, lock-free SPSC 인터페이스를 사용한다.
+공유 메모리 구간은 단일 생산자–단일 소비자(SPSC, Single Producer Single Consumer) 링버퍼 구조로 구현되며, 비블로킹 접근(non-blocking access), zero-copy 전달, 고해상도 시계(high-resolution clock) 동기화를 통해 약 1 kHz의 텔레메트리를 안정적으로 제공한다. \emph{Producer}는 AirSim(IMU write)이고, \emph{Consumer}는 SIL 제어기(IMU read)로 역할이 구분되며, lock-free SPSC 인터페이스를 통해 데이터를 교환한다.
 
 \subsection{SIL 제어기 센서}
-SIL 제어기는 Shared Memory에서 IMU 스트림을 read(\emph{consumer})로 비블로킹 소비하여 상태추정기와 제어기에 입력한다.
+SIL 제어기는 Shared Memory로부터 IMU 스트림을 \emph{consumer} 역할로 비블로킹 방식으로 읽어(state estimation 및 제어기 입력으로) 사용한다. 이를 통해 실제 비행제어기(Flight Controller, FC)와 동일한 센서 주파수 및 타이밍 조건에서 알고리즘을 검증할 수 있다.
 
 \subsection{Mahony 자세 추정기}
 Mahony 보완필터로 $q$를 갱신한다. 가변 $\Delta t$ 적분과 매 스텝 정규화, $\|a\|\!\approx\!g$ 조건에서만 보정, $(k_p,k_i)$는 $\|a\|$ 근접도 기반 명령치를 시간상수 $\tau$의 EMA로 스무딩한다. 정지/저속 구간에서는 자이로 바이어스를 EMA로 온라인 추정한다.
@@ -269,34 +270,35 @@ Mahony 보완필터로 $q$를 갱신한다. 가변 $\Delta t$ 적분과 매 스�
 내부 Rate PI는 조건부 적분과 I항 제한(I-limit, anti-windup)을 적용한다. 여기서 I항은 적분항(Integral, I-term)을 의미한다. D-term은 자이로율을 2단 PT2로 필터링한 뒤 $\pm\SI{12}{\micro\second}$로 클램프한다. yaw는 angle-P=0, rate-PI(+소량 D)로 0(rad/s) 수렴을 우선한다.
 
 \subsection{Controller (400 Hz)}
-이륙 후 3 s 평균(ex, ey)을 \SI{80}{\micro\second\per rad}로 변환, $\pm\SI{50}{\micro\second}$로 포화한 목표를 0.8 s 선형 램프-인으로 적용한다(믹서 이전). 또한 이산 스위치 대신 1차 EMA($\tau\!\approx\!\SI{0.25}{s}$)로 가중 $w$를 갱신하여 $e=(1-w)e_{est}+we_{gt}$로 합성, 단계 입력을 제거한다.
+이륙 후 약 3초 동안의 평균 오차 $(e_x, e_y)$를 \SI{80}{\micro\second\per rad}의 변환율로 PWM 명령치로 변환하고, 이를 $\pm\SI{50}{\micro\second}$ 범위로 포화시킨 목표값을 0.8초 동안 선형 램프-인(ramp-in) 방식으로 적용하였다(믹서 이전 단계). 또한 이산 스위치(discrete switch) 대신 시간상수 $\tau\!\approx\!\SI{0.25}{s}$의 1차 지수이동평균(Exponential Moving Average, EMA)을 이용하여 가중치 $w$를 갱신하고, 오차 합성식 $e=(1-w)e_{\mathrm{est}}+we_{\mathrm{gt}}$를 적용함으로써 단계 입력(step input)을 완화하였다.
 
 \subsection{ROTOR PWM}
-SIL 제어기는 컨트롤러에서 생성된 PWM을 \SI{400}{Hz}로 Shared Memory에 write(\emph{producer})하고, AirSim의 ROTOR는 이를 read(\emph{consumer})하여 추력/토크를 생성한다. Slew 제한과 출력 클램프는 SIL 제어기 측에서 적용되어 급격한 변화율을 완화한다.
+SIL 제어기는 컨트롤러에서 생성된 PWM 신호를 \SI{400}{Hz} 주기로 공유 메모리(Shared Memory)에 \emph{producer} 역할로 기록하며, AirSim의 로터(ROTOR)는 이를 \emph{consumer} 역할로 읽어 추력(thrust)과 토크(torque)를 생성한다. Slew rate 제한과 출력 클램프(clamp)는 SIL 제어기 측에서 적용되어 PWM의 급격한 변화율을 완화한다.
+
 
 \section{실험 및 결과}
 \subsection{실험환경}
 \begin{itemize}
-  \item \textbf{OS/플랫폼}: Windows 11, AirSim(월드·기체 파라미터 고정)
-  \item \textbf{I/O 경로}: in-process Shared Memory (IMU \(~1\,kHz\), PWM 400 Hz)
-  \item \textbf{실행 설정}: 스레드 우선순위 상향, 타이머 분해능 1 ms
+  \item \textbf{OS 및 플랫폼:} Windows 11, AirSim (월드 및 기체 파라미터 고정)
+  \item \textbf{I/O 경로:} 프로세스 내 공유 메모리(in-process shared memory), IMU 약 \(1~\mathrm{kHz}\), PWM \(400~\mathrm{Hz}\)
+  \item \textbf{실행 설정:} 스레드 우선순위 상향 및 타이머 분해능(timer resolution) \(1~\mathrm{ms}\)
 \end{itemize}
 
 
 \subsection{시스템 구성 및 실행 절차}
 \subsubsection{구성 요약}
-AirSim(\emph{producer})는 IMU를 Shared Memory에 write(\(~1\,kHz\))하고, SIL 제어기(\emph{consumer})는 이를 read하여 Mahony-Attitude P-Rate PI+D를 거쳐 PWM을 \SI{400}{Hz}로 write한다. AirSim은 PWM을 read하여 모터 모델에 적용한다. 두 모듈은 \textbf{별도 프로그램(프로세스)}으로 구동되며, Shared Memory는 AirSim이 생성·소유하고 SIL 제어기가 attach하여 read/write 한다(\emph{IMU: AirSim→SIL, PWM: SIL→AirSim}).
+AirSim(\emph{producer})은 IMU 데이터를 공유 메모리(Shared Memory)에 약 \(1~\mathrm{kHz}\)로 write하며, SIL 제어기(\emph{consumer})는 이를 read하여 Mahony–Attitude P–Rate PI+D 제어 루프를 수행한 후, PWM 신호를 \SI{400}{Hz}로 write한다. AirSim은 해당 PWM을 read하여 모터 모델에 적용한다. 두 모듈은 \textbf{별도 프로그램(프로세스)}으로 구동되며, Shared Memory는 AirSim이 생성 및 소유하고, SIL 제어기가 attach하여 read/write를 수행한다(\emph{IMU: AirSim→SIL, PWM: SIL→AirSim}).
 
 \subsubsection{실행 절차}
 \begin{enumerate}
-  \item AirSim 실행(월드·기체 파라미터 고정) 후 시뮬레이터 시간/물리 \(\Delta t\) 일관성 확인.
-  \item SIL 제어기 실행: 메인 제어 스레드 우선순위 상향, 타이머 분해능 \SI{1}{ms} 설정.
-  \item Shared Memory attach: IMU(센서) 세그먼트와 PWM 세그먼트에 대해 producer/consumer 연결 여부 확인.
-  \item 카운터 모니터링: write/read 누적 카운터가 주기적으로 증가하고 drop/overwrite가 0(또는 \(<\!0.5\%\))임을 확인.
-  \item 루프 주파수 점검: IMU 입력 \(\approx\)\SI{1}{kHz}, PWM 출력 \SI{400}{Hz} (허용 오차 \(\pm\)\SI{5}{\%}).
-  \item 워밍업 \SI{10}{s} 이후 로그 수집 시작: 원시 IMU, 추정 자세, 제어 명령, PWM, 타임스탬프를 동기 기록.
-  \item 실험 시나리오(S1--S4)별로 동일 초기조건에서 연속 실행; 각 러닝마다 실행 화면 캡처 저장.
-  \item 종료 시 로그 무결성 검사(타임스탬프 단조 증가, 샘플 수, 누락율) 후 분석 스크립트로 지표 산출.
+  \item AirSim 실행(월드 및 기체 파라미터 고정) 후 시뮬레이터 시간 및 물리 \(\Delta t\) 일관성을 확인한다.
+  \item SIL 제어기 실행: 메인 제어 스레드의 우선순위를 상향하고, 타이머 분해능(timer resolution)을 \SI{1}{ms}로 설정한다.
+  \item Shared Memory 연결 확인: IMU(센서) 세그먼트와 PWM 세그먼트에 대해 producer/consumer 연결 여부를 점검한다.
+  \item 카운터 모니터링: write/read 누적 카운터가 주기적으로 증가하고, drop 또는 overwrite 비율이 0 (또는 \(<0.5\%\))임을 확인한다.
+  \item 루프 주파수 점검: IMU 입력은 약 \SI{1}{kHz}, PWM 출력은 \SI{400}{Hz}이며, 허용 오차는 \(\pm5\%\) 이내로 유지되어야 한다.
+  \item 워밍업(약 \SI{10}{s}) 이후 로그 수집을 시작한다. 수집 항목은 원시 IMU, 추정 자세, 제어 명령, PWM, 타임스탬프이며, 이들을 동기 기록한다.
+  \item 실험 시나리오(S1–S4)를 동일한 초기 조건에서 연속 실행하고, 각 실험 러닝마다 실행 화면을 캡처하여 저장한다.
+  \item 종료 시 로그 무결성 검사를 수행한다. 타임스탬프의 단조 증가, 샘플 수, 누락율을 확인하고, 분석 스크립트를 통해 최종 지표를 산출한다.
 \end{enumerate}
 
 \subsubsection{핵심 파라미터}
