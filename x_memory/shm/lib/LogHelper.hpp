@@ -9,7 +9,9 @@
 #include <chrono>
 #include <ctime>
 #include <cstdio>
-#include <filesystem>
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 struct XSimTelemetry; // fwd
 struct XSimPwm;       // fwd
@@ -20,9 +22,19 @@ public:
     // Create LOGS/timestamp.LOG and return full path (empty if failed)
     std::string openNew(const std::string& root = "LOGS")
     {
-        try {
-            std::filesystem::create_directories(root);
-        } catch(...) {}
+        // create directory (best-effort, minimal deps for UE build)
+        auto mkdirs = [](const std::string& path){
+            #ifdef _WIN32
+            size_t pos = 0; 
+            while ((pos = path.find_first_of("/\\", pos)) != std::string::npos) {
+                std::string dir = path.substr(0, pos);
+                if (!dir.empty()) _mkdir(dir.c_str());
+                ++pos;
+            }
+            _mkdir(path.c_str());
+            #endif
+        };
+        mkdirs(root);
         auto now = std::chrono::system_clock::now();
         std::time_t t = std::chrono::system_clock::to_time_t(now);
         std::tm lt{}; localtime_s(&lt, &t);

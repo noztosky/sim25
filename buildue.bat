@@ -11,6 +11,19 @@ set "BLOCKS_PLUGIN_DIR=%PROJECT_DIR%\Plugins\AirSim"
 echo ===== copy pluugins ======
 robocopy "d:\open\airsim\Unreal\Plugins\AirSim\Source\Vehicles\Multirotor" "d:\open\airsim\Unreal\Environments\Blocks\Plugins\AirSim\Source\Vehicles\Multirotor" /E /COPY:DAT /R:0 /W:0 /NFL /NDL /NP /NJH /NJS
 
+REM Ensure x_xsim headers are available under plugin Source for relative includes
+set "XSIM_SRC=%ROOT_DIR%x_memory\shm"
+set "XSIM_DST=%BLOCKS_PLUGIN_DIR%\Source\x_memory\shm"
+if not exist "%XSIM_DST%" mkdir "%XSIM_DST%"
+REM Clean any previous test sources that may break UE build
+if exist "%XSIM_DST%\test_client.cpp" del /q "%XSIM_DST%\test_client.cpp"
+if exist "%XSIM_DST%\test_speed.cpp" del /q "%XSIM_DST%\test_speed.cpp"
+if exist "%XSIM_DST%\*.cpp" del /q "%XSIM_DST%\*.cpp"
+REM Copy core header only
+robocopy "%XSIM_SRC%" "%XSIM_DST%" x_xsim.h /R:0 /W:0 /NFL /NDL /NP /NJH /NJS >nul
+REM Copy library headers (no test files)
+robocopy "%XSIM_SRC%\lib" "%XSIM_DST%\lib" /E /COPY:DAT /R:0 /W:0 /NFL /NDL /NP /NJH /NJS >nul
+
 echo ===== AirSim UE build (Blocks) =====
 
 REM 1) Kill processes

@@ -70,6 +70,7 @@ private:
     HP Z840 desktop high-end config seems to be able to go up to 500Hz.
     To increase freq with limited CPU power, switch Barometer to constant ref mode.
     */
-    long long physics_loop_period_ = 1000000LL; //1ms
+    //long long physics_loop_period_    = 1000000LL;    // 1000  Hz (too fast)
+    long long physics_loop_period_      = 10000LL;     //  100000Hz (default)
     // noztosky 2025-10-09 3ms -> 1ms
 };

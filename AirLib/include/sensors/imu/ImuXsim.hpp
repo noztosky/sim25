@@ -7,7 +7,7 @@
 #include "common/XlabUeMetrics.hpp"
 #include "common/EarthUtils.hpp"
 // use new x_xsim shared memory for composite telemetry
-#include "D:\\open\\airsim\\x_memory\\x_xsim.h"
+#include "../../../../x_memory/shm/x_xsim.h"
 #include "common/XlabXMemoryAdapter.hpp"
 
 namespace msr
@@ -41,7 +41,7 @@ public:
 
         if (!xmem_inited_) {
             // init 1kHz pacing and x_xsim server mapping
-            target_hz_ = 1000.0f;
+            target_hz_ = 10000.0f;
             period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(target_hz_));
             next_write_tp_ns_ = clock()->nowNanos() + period_ns_;
             if (!xsim_) xsim_.reset(new x_xsim());
@@ -157,7 +157,7 @@ private:
 
     std::unique_ptr<x_xsim> xsim_;
     bool xmem_inited_ = false;
-    float target_hz_ = 1000.0f;
+    float target_hz_ = 10000.0f;
     // scheduling for consistent rate
     TTimePoint next_write_tp_ns_ = 0;
     TTimePoint period_ns_ = 0;

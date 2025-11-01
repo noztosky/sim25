@@ -19,7 +19,7 @@
 #include "common/AirSimSettings.hpp"
 #include "common/XlabUeMetrics.hpp"
 // switch to x_xsim for PWM/telemetry
-#include "D:\\open\\airsim\\x_memory\\x_xsim.h"
+#include "../../../../../../x_memory/shm/x_xsim.h"
 
 //TODO: we need to protect contention between physics thread and API server thread
 namespace msr
