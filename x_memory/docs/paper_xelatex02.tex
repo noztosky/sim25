@@ -59,6 +59,8 @@
 % 섹션/소섹션 위아래 간격 축소 (before, after)
 \titlespacing*{\section}{0pt}{0.8ex plus .2ex minus .1ex}{1.2ex}
 \titlespacing*{\subsection}{0pt}{0.6ex plus .1ex minus .1ex}{0.4ex}
+% 소소제목(\subsubsection) 위/아래 간격: 현재 줄간격의 1/2
+\titlespacing*{\subsubsection}{0pt}{0.5\baselineskip}{0.5\baselineskip}
 
 % 문단 간격/들여쓰기 조정 (촘촘한 본문)
 \setlength{\parskip}{0.25ex plus 0.1ex minus 0.1ex}
@@ -578,6 +580,13 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]=
 
 
 \subsubsection{통신 경로 비교: RPC vs Shared Memory}
+\noindent\textbf{측정 방법(센서 스캔 주파수)}:\ 
+각 경로(RPC/Shared Memory)에서 센서 입력(IMU, Barometer)과 PWM 출력에 대해 레코드의 타임스탬프(ts\_ns)를 사용해 유효 주파수를 산출하였다. 공정 비교를 위해 60--120 s 분석 윈도우에서 평균/분산을 측정하고, 드롭/오버라이트 비율을 함께 기록하였다.
+\begin{itemize}
+  \item \textbf{측정 대상}: IMU 입력(목표 1000 Hz), Barometer 입력(목표 100 Hz), PWM 출력(목표 400 Hz)
+  \item \textbf{산출 방식}: 인접 샘플 간 \(\Delta t\) 역수로 순간 주파수 계산 후, 윈도우 평균(Hz)과 지연/지터 통계(P50/P95) 보고
+  \item \textbf{환경 고정}: 동일 PC/월드/\(\Delta t\), 스레드 우선순위 상향, Windows 타이머 분해능 1 ms, 패킷 크기 고정(Nagle 옵션 명시)
+\end{itemize}
 RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스택 오버헤드로 인해 목표 루프 주파수에 안정적으로 도달하기 어려웠고, 공유메모리(SPSC, zero-copy)를 사용하는 \emph{SIL 제어기}는 목표(IMU \(\sim\!1\,kHz\), Barometer \(\sim\!100\,Hz\), PWM \(400\,Hz\))를 안정 달성하였다. 아래 표는 동일 PC/월드/\(\Delta t\)/스레드 우선순위/타이머 분해능 조건에서 측정한 비교를 정리한다.\footnote{공정성: 동일 하드웨어, Windows 타이머 분해능 1 ms, 제어 스레드 고우선, 동일 분석 윈도우, RPC는 패킷 크기 고정 및 Nagle 옵션 명시.}
 
 % TODO: 아래 표의 [RPC_...]와 [SHM_...] 표기를 사용해 실측값을 채워주세요

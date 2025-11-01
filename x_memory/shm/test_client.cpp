@@ -21,8 +21,7 @@
 #include "lib/RotorWriter.hpp"
 #include "lib/AttitudeUtils.hpp"
 #include "lib/PidController.hpp"
-#include "attitude_estimator.hpp"
-#include "attitude_estimator.hpp"
+#include "../attitude_estimator.hpp"
 
 // Scenario selection
 #define SCENARIO_CARDINAL_TILT     1
