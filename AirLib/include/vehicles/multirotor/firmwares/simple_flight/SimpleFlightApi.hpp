@@ -93,35 +93,41 @@ namespace airlib
                     commandMotorPWMs(u0, u1, u2, u3);
                     pwm_read_count_sec_++;
                 }
-                // consume latest telemetry to populate values (and accumulate aux stream ticks)
-                xsim_->consume_telem(last_telem_seq, [this](const XSimTelemetry& d){
+                // peek latest telemetry to populate values without advancing tail_seq (to observe external consumer overrun)
+                xsim_->peek_telem(last_telem_seq, [this](const XSimTelemetry& d){
                     last_telem_ = d; have_telem_ = true;
-                    auto now = std::chrono::steady_clock::now();
-                    using namespace std::chrono;
-                    if ((now - last_loc_tick_tp_) >= milliseconds(10)) { ++loc_count_sec_; last_loc_tick_tp_ = now; }
                 });
-                // poll AirSim sensors to get true 100 Hz counts for baro/mag
+                // read latest baro/mag values from sensors (values for display),
+                // Hz values come from ImuXsim (Shared Memory) internal schedule measurement
                 {
                     const auto& baro_out = getBarometerData("");
-                    if (baro_out.time_stamp != last_baro_ts_ns_) {
-                        last_baro_ts_ns_ = baro_out.time_stamp;
-                        latest_baro_alt_ = baro_out.altitude;
-                        ++baro_count_sec_exact_;
-                    }
+                    latest_baro_alt_ = baro_out.altitude;
                     const auto& mag_out = getMagnetometerData("");
-                    if (mag_out.time_stamp != last_mag_ts_ns_) {
-                        last_mag_ts_ns_ = mag_out.time_stamp;
-                        latest_mag_[0] = mag_out.magnetic_field_body.x();
-                        latest_mag_[1] = mag_out.magnetic_field_body.y();
-                        latest_mag_[2] = mag_out.magnetic_field_body.z();
-                        ++mag_count_sec_exact_;
-                    }
+                    latest_mag_[0] = mag_out.magnetic_field_body.x();
+                    latest_mag_[1] = mag_out.magnetic_field_body.y();
+                    latest_mag_[2] = mag_out.magnetic_field_body.z();
                 }
                 // 1-second combined log (even if no new PWM in this tick)
                 auto now = std::chrono::steady_clock::now();
                 auto dt_sec = std::chrono::duration<double>(now - last_log_tp_).count();
                 if (dt_sec >= 1.0) {
                     int imu_hz = XlabUeMetrics::getImuHz();
+                    int imu_emit_hz = XlabUeMetrics::getImuEmitHz();
+                    // consumer-side overrun (drops) measured in x_xsim
+                    static uint64_t prev_overrun_total = 0;
+                    static bool overrun_baselined = false;
+                    uint64_t cur_overrun_total = xsim_ ? xsim_->get_telem_overrun_total() : 0ULL;
+                    int imu_overrun_hz = 0;
+                    if (!overrun_baselined) {
+                        // avoid startup spike: baseline on first report
+                        prev_overrun_total = cur_overrun_total;
+                        overrun_baselined = true;
+                    } else if (dt_sec > 0.9) {
+                        uint64_t delta_overrun = (cur_overrun_total >= prev_overrun_total)
+                                                  ? (cur_overrun_total - prev_overrun_total)
+                                                  : 0ULL;
+                        imu_overrun_hz = static_cast<int>(std::lround(delta_overrun / dt_sec));
+                    }
                     int pwm_hz = dt_sec > 0.0 ? static_cast<int>(std::lround(pwm_read_count_sec_ / dt_sec)) : 0;
                     // populate from last telemetry if available (gyro deg/s, acc m/s^2)
                     double gx = have_telem_ ? (last_telem_.gyro[0] * 57.2957795131) : 0.0;
@@ -134,19 +140,20 @@ namespace airlib
                     double mx = latest_mag_[0];
                     double my = latest_mag_[1];
                     double mz = latest_mag_[2];
-                    int mag_hz = dt_sec > 0.0 ? static_cast<int>(std::lround(mag_count_sec_exact_ / dt_sec)) : 0;
+                    int mag_hz = XlabUeMetrics::getMagHz();
                     double alt = latest_baro_alt_;
-                    int baro_hz = dt_sec > 0.0 ? static_cast<int>(std::lround(baro_count_sec_exact_ / dt_sec)) : 0;
+                    int baro_hz = XlabUeMetrics::getBaroHz();
                     double nx = have_telem_ ? last_telem_.loc_ned[0] : 0.0;
                     double ny = have_telem_ ? last_telem_.loc_ned[1] : 0.0;
                     double nz = have_telem_ ? last_telem_.loc_ned[2] : 0.0;
-                    int loc_hz = dt_sec > 0.0 ? static_cast<int>(std::lround(loc_count_sec_ / dt_sec)) : 0;
+                    int loc_hz = XlabUeMetrics::getLocHz();
                     Utils::log(Utils::stringf(
-                        "imu: %.2f %.2f %.2f %.2f %.2f %.2f(%dHz), mag: %.2f %.2f %.2f (%dHz) baro: %.2f (%dHz) loc: %.2f %.2f %.2f (%dHz) pwm: %d %d %d %d  (%dHz)",
-                        gx,gy,gz,ax,ay,az, imu_hz, mx,my,mz, mag_hz, alt, baro_hz, nx,ny,nz, loc_hz,
+                        "imu: %.2f %.2f %.2f %.2f %.2f %.2f(%dHz, emit %d, overrun %d), mag: %.2f %.2f %.2f (%dHz) baro: %.2f (%dHz) loc: %.2f %.2f %.2f (%dHz) pwm: %d %d %d %d  (%dHz)",
+                        gx,gy,gz,ax,ay,az, imu_hz, imu_emit_hz, imu_overrun_hz, mx,my,mz, mag_hz, alt, baro_hz, nx,ny,nz, loc_hz,
                         last_pwm_r_[0], last_pwm_r_[1], last_pwm_r_[2], last_pwm_r_[3], pwm_hz));
                     last_log_tp_ = now;
                     pwm_read_count_sec_ = 0;
+                    prev_overrun_total = cur_overrun_total;
                     baro_count_sec_exact_ = mag_count_sec_exact_ = 0;
                     loc_count_sec_ = 0;
                 }

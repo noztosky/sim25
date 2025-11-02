@@ -262,7 +262,7 @@ AirSim에서 생성된 센서 데이터는 운영체제 공유 메모리(IPC) �
 공유 메모리는 단일 생산자–단일 소비자(SPSC) 링버퍼 구조로 설계되었으며, 
 비블로킹 접근(non-blocking access)과 zero-copy 방식을 통해 불필요한 데이터 복사를 제거한다. 
 IMU처럼 \SI{1}{kHz}급 고주기 데이터와 BARO/MAG처럼 저주기 데이터가 혼재할 수 있도록, 
-각 레코드는 “센서 타입 + 타임스탬프” 메타데이터를 포함한다. 
+각 레코드는 "센서 타입 + 타임스탬프" 메타데이터를 포함한다. 
 \emph{Producer}는 AirSim 센서 모듈(IMU, BARO, MAG write)이며, 
 \emph{Consumer}는 SIL 제어기(IMU, BARO, MAG read)로 역할이 구분된다. 
 이들은 lock-free SPSC 인터페이스를 통해 실시간 텔레메트리 데이터를 교환한다.
@@ -317,27 +317,28 @@ Slew rate 제한과 출력 클램프는 SIL 제어기 측에서 적용되어
 \subsection{시스템 구성 및 실행 절차}
 
 \subsubsection{구성 요약}
-AirSim (\emph{producer})은 IMU 데이터를 Shared Memory에 
-\emph{write}(\SI{1}{kHz})하고, SIL 제어기 (\emph{consumer})는 이를 
-\emph{read}하여 Mahony–Attitude P–Rate PI+D 루프를 거쳐 
+AirSim (\emph{producer})은 IMU 데이터를 \SI{1}{kHz} 주기로 
+Shared Memory에 \emph{write}하고, SIL 제어기 (\emph{consumer})는 이를 
+\emph{read}하여 Mahony 기반 자세(P)–속도(PI+D) 루프를 수행한 뒤 
 PWM 신호를 \SI{400}{Hz}로 \emph{write}한다.  
 AirSim은 해당 PWM 데이터를 \emph{read}하여 모터 모델에 적용한다.  
 
-두 모듈은 \textbf{별도 프로그램(프로세스)}으로 구동되며, Shared Memory는 
-AirSim이 생성·소유하고 SIL 제어기가 attach하여 read/write한다  
+두 모듈은 \textbf{별도의 프로그램(프로세스)}으로 동작하며, 
+Shared Memory는 AirSim이 생성·소유하고 SIL 제어기가 
+\emph{attach}하여 read/write한다  
 (\emph{IMU: AirSim→SIL, PWM: SIL→AirSim}).
 
 \subsubsection{실행 절차}
 프로그램 실행 시 내부적으로 다음 절차가 순차적으로 수행된다.
 \begin{enumerate}
-  \item AirSim 모듈이 초기화되며, 월드 및 기체 파라미터를 고정한 후 시뮬레이터의 시간 및 물리 \(\Delta t\) 일관성을 검증한다.
-  \item SIL 제어기가 시작되어 메인 제어 스레드의 우선순위를 상향하고, 타이머 분해능을 \SI{1}{ms}로 설정한다.
-  \item Shared Memory가 생성 및 연결되며, IMU(센서) 세그먼트와 PWM 세그먼트 간의 producer/consumer 상태를 확인한다.
-  \item write/read 카운터가 주기적으로 증가하는지 모니터링하고, drop 또는 overwrite 비율이 0(또는 \(<\!0.5\%\))임을 점검한다.
-  \item 제어 루프 주파수를 확인한다. IMU 입력은 약 \SI{1}{kHz}, PWM 출력은 \SI{400}{Hz}이며, 허용 오차는 \(\pm\)\SI{5}{\%} 이내여야 한다.
-  \item 워밍업 \SI{10}{s} 이후 원시 IMU, 추정 자세, 제어 명령, PWM, 타임스탬프를 동기 기록한다.
-  \item 실험 시나리오(S1--S4)에 따라 동일 초기 조건에서 순차 실행하며, 각 러닝별 로그 및 상태를 저장한다.
-  \item 종료 시 로그 무결성을 검사하고 (타임스탬프 단조 증가, 샘플 수, 누락률), 이상이 없을 경우 분석 스크립트를 통해 지표를 산출한다.
+  \item \textbf{AirSim 초기화:} AirSim 모듈을 구동하여 월드 및 기체 파라미터를 고정하고, 시뮬레이터의 시간 및 물리 시뮬레이션 간의 \(\Delta t\) 일관성을 검증한다.
+  \item \textbf{SIL 제어기 설정:} SIL 제어기를 시작하고 메인 제어 스레드의 우선순위를 상향하며, 타이머 분해능을 \SI{1}{ms}로 설정한다.
+  \item \textbf{Shared Memory 연결:} IMU(센서) 및 PWM 세그먼트에 대해 Shared Memory를 생성·연결하고, producer/consumer 상태를 점검한다.
+  \item \textbf{데이터 모니터링:} write/read 카운터의 주기적 증가 여부를 확인하며, 데이터 drop 또는 overwrite 비율이 0 (또는 \(<\!0.5\%\))임을 검증한다.
+  \item \textbf{제어 루프 검증:} IMU 입력 주파수(\(\sim\)\SI{1}{kHz})와 PWM 출력 주파수(\SI{400}{Hz})를 측정하여, 허용 오차가 \(\pm\)\SI{5}{\%} 이내임을 확인한다.
+  \item \textbf{워밍업 및 기록:} 워밍업 \SI{10}{s} 이후 원시 IMU 데이터, 추정 자세, 제어 명령, PWM, 타임스탬프를 동기화하여 기록한다.
+  \item \textbf{시나리오 실행:} 실험 시나리오(S1--S4)를 동일한 초기 조건에서 순차적으로 수행하고, 각 러닝(run)의 로그 및 상태를 저장한다.
+  \item \textbf{종료 및 분석:} 종료 시 로그의 무결성을 검사한다 (타임스탬프 단조 증가, 샘플 수, 누락률 등). 이상이 없을 경우 분석 스크립트를 통해 성능 지표를 산출한다.
 \end{enumerate}
 
 \subsubsection{핵심 파라미터}
@@ -473,67 +474,66 @@ void update(Mahony& m, const ImuSample& s, int64_t prev_ns) {
 \toprule
 항목 & Baseline & Proposed \\
 \midrule
-D-term 필터 & 단일 PT1 (LPF) & 2단 PT2 + 클램프 \\
-트림 적용 & 즉시 적용 & 3 s 관측 $\rightarrow$ 0.8 s 램프-인 \\
-추정기 게인 & 계단 전환 & EMA 스무딩 ($\tau\!\approx\!0.35$ s) \\
-EST/GT 전환 & 이산 스위치 & 연속 블렌딩 ($\tau\!\approx\!0.25$ s) \\
-Slew 제한 & \SI{8}{\micro s} & \SI{4}{\micro s} \\
+D-term 필터 & PT1 & PT2$\times$2+Clamp \\
+Trim & 즉시 & 3 s 관측 $\rightarrow$ 0.8 s 램프 \\
+추정기 게인 & 계단 & EMA \\
+EST/GT 전환 & 이산 & 연속 블렌딩 \\
+Slew 제한 (\si{\micro s}) & 8 & 4 \\
 Yaw 루프 & D 중심 & Rate-PI (anti-windup) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-수치 값의 정의 및 적용 위치는 섹션~4.6의 표~(\ref{tab:key_params_xe}, \ref{tab:cross_ref_xe})를 따른다.
+\paragraph{실측 결과(본 작업)} 다음의 설정과 구현으로 얻은 수치이다: 링버퍼 용량 1 (CAP=1), SHM 퍼블리셔(IMU) 목표 100 kHz, PWM 목표 400 Hz, Barometer/Magnetometer 목표 100 Hz.
+\begin{table}[H]
+\centering
+\caption{CAP=1 조건 실측 요약}
+\label{tab:cap1_shm_rpc}
+\begin{tabular}{lcccc}
+\toprule
+경로 & IMU(Hz) & BARO(Hz) & MAG(Hz) & PWM(Hz) \\
+\midrule
+SHM & 78383 & 100.000 & 100.000 & 400.000 \\
+RPC & 15516 & 99.9968 & 99.9968 & 339.987 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
+수치 값의 정의 및 적용 위치는 섹션~4.6의 표~\ref{tab:key_params_xe}를 따른다.
 
+\subsection{프로토콜 및 지표}
+각 시나리오는 $N{=}20$회 반복 수행되며, 모든 실험은 공통된 초기 조건에서 시작한다.  
+분석 구간은 시뮬레이션 시작 후 \SI{30}{s}부터 \SI{120}{s}까지로 설정하였다.  
 
+평가 지표는 다음과 같다:  
+Peak-to-Peak(\si{\micro\second}), 포화율(\%), Attitude RMS/95th(\si{\degree}),  
+Steady yaw-rate(\si{\radian\per\second}), cp/cr/cy 명령(\si{\micro\second}),  
+지연 및 지터(\si{\milli\second}).  
+모든 지표는 워밍업 구간(\SI{10}{s}) 이후 동일한 분석 윈도우 내에서 산출하였다.  
+여기서 cp, cr, cy는 믹서 기준의 pitch/roll/yaw 축 성분 명령(\si{\micro\second})을 의미한다.
 
-
-/// 여기까지 작성 완료
-
-
-
-\subsection{프로토콜·지표}
-각 시나리오 $N{=}20$ 반복, 공통 초기조건, 분석 윈도우 30-120 s. 지표: Peak-to-Peak(\(\mu s\)), 포화율(%), Attitude RMS/95th(deg), Steady yaw-rate(rad/s), cp/cr/cy(\(\mu s\)), 지연/지터(ms). 모든 지표는 워밍업 \SI{10}{s} 이후 동일 분석 윈도우에서 산출한다. 여기서 cp/cr/cy는 믹서 기준의 pitch/roll/yaw 성분 명령(\(\mu s\))을 의미한다.
-
-\subsection{핵심 파라미터 표}
+\subsection{핵심 파라미터}
 \begin{table}[htb]
 \centering
-\caption{핵심 파라미터(실험 설정)}
+\caption{실험에 사용된 핵심 파라미터}
 \begin{tabular}{ll}
 \toprule
-항목 & 값 \\
+항목 & 설정값 \\
 \midrule
-EST/GT 임계 & 5$^\circ$ \\
-블렌딩(EMA) & $\tau\!\approx\!0.25$ s, $\alpha_{\max}=0.25$ \\
-Attitude 데드존 & 0.005 rad \\
-D-클램프 & $\pm \SI{12}{\micro\second}$ \\
-Trim(관측/램프/한계) & 3 s / 0.8 s / $\pm \SI{50}{\micro\second}$ \\
-각도→출력 & \SI{80}{\micro\second\per rad} \\
-Slew 제한 & 4 $\mu$s/step \\
+EST/GT 오차 임계값 & \SI{5}{\degree} \\
+블렌딩(EMA) 상수 & $\tau \approx \SI{0.25}{s}$, $\alpha_{\max}=0.25$ \\
+Attitude 데드존 & \SI{0.005}{rad} \\
+D-클램프 범위 & $\pm \SI{12}{\micro\second}$ \\
+Trim(관측/램프/한계) & \SI{3}{s} / \SI{0.8}{s} / $\pm \SI{50}{\micro\second}$ \\
+각도→출력 변환비 & \SI{80}{\micro\second\per rad} \\
+Slew-rate 제한 & \SI{4}{\micro\second\per step} \\
 \bottomrule
 \end{tabular}
 \label{tab:key_params_xe}
 \end{table}
 
-\begin{table}[htb]
-\centering
-\caption{섹션 IV 수치 교차참조(사용 위치)}
-\begin{tabular}{ll}
-\toprule
-수치 & 사용 위치 \\
-\midrule
-5$^\circ$ 임계 & 방법-블렌딩; 실험-파라미터/안전 \\
-$\tau\!\approx\!0.25$ s & 방법-블렌딩; 실험-파라미터 \\
-0.005 rad 데드존 & 방법-제어기; 실험-파라미터 \\
-$\pm \SI{12}{\micro\second}$ 클램프 & 방법-제어기; 실험-파라미터 \\
-3 s / 0.8 s / $\pm \SI{50}{\micro\second}$ & 방법-트림; 실험-파라미터 \\
-\SI{80}{\micro\second\per rad} & 방법-트림; 실험-파라미터 \\
-4 $\mu$s/step Slew & 방법-제어기/보호; 실험-파라미터 \\
-\bottomrule
-\end{tabular}
-\label{tab:cross_ref_xe}
-\end{table}
+
+% (삭제) 섹션 IV 수치 교차참조 표는 본문 서술로 대체
 
 \subsection{정량 결과(로그)}
 % Hover-bias 10 Hz 로그 발췌와 간단 요약(결과 섹션으로 이동)
@@ -546,18 +546,7 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]=
 
 \noindent 위 로그의 초기 10개 스냅샷(호버 구간)에서 요약 통계는 다음과 같다: yaw-rate \(\approx 0.00\,\mathrm{rad/s}\), cp \(\approx 0.77\,\mu s\), cr \(\approx -0.25\,\mu s\). 추정치(est)와 GT의 오일러 각은 \(\sim 0.0{-}0.1^\circ\) 범위로 일치한다.
 
-\begin{table}[htb]
-\centering
-\caption{Hover-bias 초기 10개 스냅샷 평균(10 Hz 요약)}
-\label{tab:hover_bias_snap_mean}
-\begin{tabular}{lccc}
-\toprule
-항목 & cp(\(\mu s\)) & cr(\(\mu s\)) & yaw-rate(rad/s) \\
-\midrule
-평균 & 0.77 & -0.25 & 0.00 \\
-\bottomrule
-\end{tabular}
-\end{table}
+
 \begin{table}[htb]
 \centering
 \caption{시나리오별 정량 지표 요약(세로 전치, 워밍업 10 s 제외, 윈도우 30--120 s)}
@@ -587,32 +576,11 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]=
   \item \textbf{산출 방식}: 인접 샘플 간 \(\Delta t\) 역수로 순간 주파수 계산 후, 윈도우 평균(Hz)과 지연/지터 통계(P50/P95) 보고
   \item \textbf{환경 고정}: 동일 PC/월드/\(\Delta t\), 스레드 우선순위 상향, Windows 타이머 분해능 1 ms, 패킷 크기 고정(Nagle 옵션 명시)
 \end{itemize}
-RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스택 오버헤드로 인해 목표 루프 주파수에 안정적으로 도달하기 어려웠고, 공유메모리(SPSC, zero-copy)를 사용하는 \emph{SIL 제어기}는 목표(IMU \(\sim\!1\,kHz\), Barometer \(\sim\!100\,Hz\), PWM \(400\,Hz\))를 안정 달성하였다. 아래 표는 동일 PC/월드/\(\Delta t\)/스레드 우선순위/타이머 분해능 조건에서 측정한 비교를 정리한다.\footnote{공정성: 동일 하드웨어, Windows 타이머 분해능 1 ms, 제어 스레드 고우선, 동일 분석 윈도우, RPC는 패킷 크기 고정 및 Nagle 옵션 명시.}
+RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스택 오버헤드로 인해 목표 루프 주파수에 안정적으로 도달하기 어려웠고, 공유메모리(SPSC, zero-copy)를 사용하는 \emph{SIL 제어기}는 고주파(IMU \(\sim\!100\,kHz\), Barometer \(\sim\!100\,Hz\), PWM \(400\,Hz\))에서도 안정적으로 동작하였다.
 
-% TODO: 아래 표의 [RPC_...]와 [SHM_...] 표기를 사용해 실측값을 채워주세요
-\begin{table}[htb]
-\centering
-\caption{통신 경로 비교: RPC vs Shared Memory (실 데이터 입력 지점 표시)}
-\label{tab:rpc_shm_compare}
-\resizebox{\columnwidth}{!}{%
-\begin{tabular}{lccc}
-\toprule
-항목 & RPC & Shared Memory & 메모 \\
-\midrule
-Inertial Measurement Unit (IMU) 입력(목표/달성, Hz) & 1000 / \emph{[RPC\_IMU\_HZ]} & 1000 / $\sim$1000 & 60--120 s 평균 \\
-Barometer(목표/달성, Hz) & 100 / \emph{[RPC\_BARO\_HZ]} & 100 / $\sim$100 &  \ \\
-PWM 출력(목표/달성, Hz) & 400 / \emph{[RPC\_PWM\_HZ]} & 400 / 400 &  \ \\
-지연 P50/P95 (ms) & \emph{[RPC\_LAT\_P50]} / \emph{[RPC\_LAT\_P95]} & \emph{[SHM\_LAT\_P50]} / \emph{[SHM\_LAT\_P95]} & 동윈도우 계산 \\
-지터 P50/P95 (ms) & \emph{[RPC\_JIT\_P50]} / \emph{[RPC\_JIT\_P95]} & \emph{[SHM\_JIT\_P50]} / \emph{[SHM\_JIT\_P95]} &  \ \\
-드롭/오버라이트(\%) & \emph{[RPC\_DROP\_PCT]} & \emph{[SHM\_DROP\_PCT]} & $<0.5\%$ 권장 \\
-CPU 사용률(\%) & \emph{[RPC\_CPU\_PCT]} & \emph{[SHM\_CPU\_PCT]} & 전체/스레드 기준 중 택1 \\
-메시지/직렬화 크기 & \emph{[RPC\_MSG\_BYTES]} & n/a & RPC만 해당 \\
-\bottomrule
-\end{tabular}%
-}
-\end{table}
 
-요약하면, RPC 경로는 \emph{[한계 요약 예: IMU $\approx$ 600--800 Hz, PWM $\approx$ 100--200 Hz]} 수준에 머문 반면, 공유메모리 경로는 목표 주파수를 일관되게 유지하였다. 이 결과는 제어기/필터 블록을 \emph{SIL 제어기}에서 검증 후 실제 FC에 소스 수준으로 신속 이식할 수 있음을 뒷받침한다.
+
+요약하면, RPC 경로는 \emph{[한계 요약 예: IMU \(\approx\) 600--800 Hz, PWM \(\approx\) 100--200 Hz]} 수준에 머문 반면, 공유메모리 경로는 목표 주파수를 일관되게 유지하였다. 이 결과는 제어기/필터 블록을 \emph{SIL 제어기}에서 검증 후 실제 FC에 소스 수준으로 신속 이식할 수 있음을 뒷받침한다.
 
 \subsubsection{루프 주파수 달성(External Virtual FC)}
 외부 프로그램(\emph{Virtual FC})에서 실행한 고주파 폐루프의 달성 주파수는 다음과 같다: IMU \(\approx\!1000\,\mathrm{Hz}\), Barometer \(\approx\!100\,\mathrm{Hz}\), PWM \(\approx\!400\,\mathrm{Hz}\). 워밍업 \SI{10}{s}를 제외한 동일 분석 윈도우에서의 내부 모니터 로그 발췌는 아래와 같다.
@@ -659,18 +627,18 @@ PWM & 400 & $\leq$ 2 \\
 향후 과제로는 (i) 동적 노치 자동화와 추가 필터 체인 최적화, (ii) magnetometer/altitude (BARO) 통합 및 EKF 대체 비교, (iii) 다양한 부하/스케줄링 조건에서의 지연/지터 정량화, (iv) ROS2·HIL·실기체 포팅을 통한 외삽 검증, (v) 자동 튜닝/안정성 진단 도구화가 있다.
 
 \begin{thebibliography}{12}
-\bibitem{ardutune} ArduPilot, “Copter PID Tuning and Rate Controller (ATC\_RAT\_), Filter/Notch Docs,” 2025. \url{https://ardupilot.org/copter/docs/tuning.html}
-\bibitem{px4tune} PX4 Dev Team, “Multicopter PID Tuning Guide,” 2025. \url{https://docs.px4.io/main/en/config_mc/pid_tuning_guide_multicopter.html}
+\bibitem{ardutune} ArduPilot, "Copter PID Tuning and Rate Controller (ATC\_RAT\_), Filter/Notch Docs," 2025. \url{https://ardupilot.org/copter/docs/tuning.html}
+\bibitem{px4tune} PX4 Dev Team, "Multicopter PID Tuning Guide," 2025. \url{https://docs.px4.io/main/en/config_mc/pid_tuning_guide_multicopter.html}
 \bibitem{astrom} K. J. \AA str\"{o}m and T. H\"{a}gglund, Advanced PID Control, ISA, 2006.
 \bibitem{zaccarian} L. Zaccarian and A. R. Teel, Modern Anti-windup Synthesis, Princeton, 2011.
-\bibitem{ardunotch} ArduPilot, “IMU Notch / Dynamic Notch Filtering,” 2025. \url{https://ardupilot.org/copter/docs/common-imu-notch-filtering.html}
-\bibitem{ardufilter} ArduPilot, “IMU Filtering Reference (INS\_GYRO\_FILTER, PID D-term filtering),” 2025. \url{https://ardupilot.org/copter/docs/common-imu-filtering.html}
-\bibitem{mahony} R. Mahony, T. Hamel, and J.-M. Pflimlin, “Nonlinear Complementary Filters on the Special Orthogonal Group,” IEEE TAC, 2008.
-\bibitem{madgwick} S. O. H. Madgwick, “An Efficient Orientation Filter for Inertial and Inertial/Magnetic Sensor Arrays,” 2010.
+\bibitem{ardunotch} ArduPilot, "IMU Notch / Dynamic Notch Filtering," 2025. \url{https://ardupilot.org/copter/docs/common-imu-notch-filtering.html}
+\bibitem{ardufilter} ArduPilot, "IMU Filtering Reference (INS\_GYRO\_FILTER, PID D-term filtering)," 2025. \url{https://ardupilot.org/copter/docs/common-imu-filtering.html}
+\bibitem{mahony} R. Mahony, T. Hamel, and J.-M. Pflimlin, "Nonlinear Complementary Filters on the Special Orthogonal Group," IEEE TAC, 2008.
+\bibitem{madgwick} S. O. H. Madgwick, "An Efficient Orientation Filter for Inertial and Inertial/Magnetic Sensor Arrays," 2010.
 \bibitem{barshalom} Y. Bar-Shalom, X.-R. Li, and T. Kirubarajan, Estimation with Applications to Tracking and Navigation, Wiley, 2001.
-\bibitem{arduslew} ArduPilot, “MOT\_SLEWRATE: Motor Output Slew Rate,” 2025. \url{https://ardupilot.org/copter/docs/parameters.html#mot-slewrate-motor-output-slew-rate}
-\bibitem{px4act} PX4 Dev Team, “Actuators / Output Configuration (output limiting, mixers),” 2025. \url{https://docs.px4.io/main/en/config/actuators.html}
-\bibitem{airsim} S. Shah et al., “AirSim: High-fidelity visual and physical simulation for autonomous vehicles,” arXiv:1705.05065, 2017.
+\bibitem{arduslew} ArduPilot, "MOT\_SLEWRATE: Motor Output Slew Rate," 2025. \url{https://ardupilot.org/copter/docs/parameters.html#mot-slewrate-motor-output-slew-rate}
+\bibitem{px4act} PX4 Dev Team, "Actuators / Output Configuration (output limiting, mixers)," 2025. \url{https://docs.px4.io/main/en/config/actuators.html}
+\bibitem{airsim} S. Shah et al., "AirSim: High-fidelity visual and physical simulation for autonomous vehicles," arXiv:1705.05065, 2017.
 \end{thebibliography}
 
 \end{document}

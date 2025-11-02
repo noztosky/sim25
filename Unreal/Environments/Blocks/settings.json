@@ -24,7 +24,13 @@
         "Barometer": {
           "SensorType": 1,
           "Enabled": true,
-          "Model": "Xsim",
+          "Model": "Simple",
+          "UpdateFrequency": 100
+        },
+        "Magnetometer": {
+          "SensorType": 6,
+          "Enabled": true,
+          "Model": "Simple",
           "UpdateFrequency": 100
         }
       }
