@@ -342,14 +342,14 @@ Shared Memory는 AirSim이 생성·소유하고 SIL 제어기가
 \end{enumerate}
 
 \subsubsection{핵심 파라미터}
-세부 파라미터 값 및 실험 조건은 섹션~4.6의 표~\ref{tab:key_params_xe}를 참조한다. 
+세부 파라미터 값 및 실험 조건은 표~\ref{tab:key_params_xe}를 참조한다. 
 각 제어 루프 및 필터의 주요 게인, 한계값, 시간상수 등이 포함된다.
 
 \subsubsection{실행 화면}
 \begin{figure}[htb]
   \centering
-  % \includegraphics[width=\columnwidth]{images/run_screen.png}
-  \caption{실행 화면 예시 (루프 주파수 및 상태 지표).}
+  \includegraphics[width=\columnwidth]{img/xsim_test.png}
+  \caption{비행 중 주파수 측정 화면: IMU, MAG, BARO, LOC, PWM (Hz) 로그.}
 \end{figure}
 
 \subsection{구현 핵심 요약 및 코드 발췌}
@@ -409,10 +409,11 @@ void onRotorUpdate() {
 
 \subsubsection{Mahony 자세 추정 핵심 (EMA, 바이어스 추정)}
 \begin{itemize}
-  \item 매 스텝에서 \(\Delta t\) 적분을 수행하며, 쿼터니언의 정규화를 유지한다.
-  \item \(|a|\!\approx\!g\) 구간에서만 가속도 신뢰도(weight)를 적용하고, 해당 신뢰도는 \(\tau\) 기반 EMA로 스무딩한다.
-  \item 정지 또는 저가속 구간에서는 자이로 바이어스를 EMA로 온라인 추정한다 (online bias tracking).
+  \item 각 스텝마다 자이로 측정값을 이용해 쿼터니언을 \(\Delta t\) 간격으로 적분하고, 수치 오차 누적을 방지하기 위해 정규화를 수행한다.
+  \item 가속도 크기가 중력 크기(\(|a|\!\approx\!g\))에 근접한 구간에서만 가속도 기반 보정 게인을 적용하며, 이 신뢰도(weight)는 시상수 \(\tau\)를 갖는 지수이동평균(EMA)으로 시간적으로 스무딩한다.
+  \item 정지 또는 저가속 상태에서는 자이로 바이어스를 지수이동평균 형태로 온라인 추정하여, 장기 드리프트를 점진적으로 보정한다 (online bias tracking).
 \end{itemize}
+
 
 \begin{lstlisting}[language=C++,caption={Mahony update loop (EMA, bias estimation)},label=lst:mahony_core]
 struct Mahony {
@@ -455,34 +456,19 @@ void update(Mahony& m, const ImuSample& s, int64_t prev_ns) {
 \end{lstlisting}
 
 \subsection{시나리오 정의}
+본 연구에서는 필터의 강건성과 외란 내성 평가를 위해 다음의 4가지 시나리오를 구성하였다.
 \begin{enumerate}[label=S\arabic*]
-  \item \textbf{Hover}: 정지 호버 (외란 없음).
-  \item \textbf{Gyro Bias}: 자이로 오프셋 주입 (\(\pm0.02\!\sim\!0.05\,\si{rad/s}\)).
-  \item \textbf{Dynamic Accel}: 가속도 외란 (\(0.3\!\sim\!0.8\,g\)), 주파수 범위 (\(0.5\!\sim\!2\,\si{Hz}\)).
-  \item \textbf{Aggressive Tilt}: 기울기 급가감 (예: \(20\!\sim\!35^{\circ}\) 명령 램프 또는 스텝 입력).
+  \item \textbf{Hover}: 외란이 없는 정지 호버 상태로, 필터의 정상상태 안정성과 잔류 진동 수준을 평가한다.
+  \item \textbf{Gyro Bias}: 자이로 바이어스(\(\pm0.02\!\sim\!0.05\,\si{rad/s}\))를 인위적으로 주입하여, 오프셋 보정 및 장기 안정성을 검증한다.
+  \item \textbf{Dynamic Accel}: \(0.3\!\sim\!0.8\,g\) 진폭, \(0.5\!\sim\!2\,\si{Hz}\) 주파수 범위의 가속도 외란을 인가하여, 가속도 기반 보정 루프의 외란 내성을 평가한다.
+  \item \textbf{Aggressive Tilt}: \(20\!\sim\!35^{\circ}\) 범위의 급격한 자세 명령(램프 또는 스텝 입력)을 통해, 큰 각속도·가속도 조건에서의 필터 수렴 특성을 분석한다.
 \end{enumerate}
 
-모든 시나리오는 워밍업 \SI{10}{s} 이후 분석되며,  
-세부 반복 횟수 및 분석 윈도우는 섹션~4.6 (프로토콜 및 지표)에 따른다.
+모든 시나리오는 워밍업 \SI{10}{s} 이후 분석되며,
+세부 반복 횟수와 분석 윈도우는 섹션~4.6(프로토콜 및 지표)에 따른다.
+
 
 \subsection{비교군 구성}
-\begin{table}[htb]
-\centering
-\caption{Baseline과 Proposed 구성 비교}
-\label{tab:baseline_proposed}
-\begin{tabular}{lll}
-\toprule
-항목 & Baseline & Proposed \\
-\midrule
-D-term 필터 & PT1 & PT2$\times$2+Clamp \\
-Trim & 즉시 & 3 s 관측 $\rightarrow$ 0.8 s 램프 \\
-추정기 게인 & 계단 & EMA \\
-EST/GT 전환 & 이산 & 연속 블렌딩 \\
-Slew 제한 (\si{\micro s}) & 8 & 4 \\
-Yaw 루프 & D 중심 & Rate-PI (anti-windup) \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \paragraph{실측 결과(본 작업)} 다음의 설정과 구현으로 얻은 수치이다: 링버퍼 용량 1 (CAP=1), SHM 퍼블리셔(IMU) 목표 100 kHz, PWM 목표 400 Hz, Barometer/Magnetometer 목표 100 Hz.
 \begin{table}[H]
@@ -493,24 +479,30 @@ Yaw 루프 & D 중심 & Rate-PI (anti-windup) \\
 \toprule
 경로 & IMU(Hz) & BARO(Hz) & MAG(Hz) & PWM(Hz) \\
 \midrule
-SHM & 78383 & 100.000 & 100.000 & 400.000 \\
-RPC & 15516 & 99.9968 & 99.9968 & 339.987 \\
+SHM & 78383.0 & 100.0 & 100.0 & 400.0 \\
+RPC & 15516.0 & 100.0 & 100.0 & 340.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-수치 값의 정의 및 적용 위치는 섹션~4.6의 표~\ref{tab:key_params_xe}를 따른다.
+수치 값의 정의 및 적용 위치는 표~\ref{tab:key_params_xe}를 따른다.
 
 \subsection{프로토콜 및 지표}
-각 시나리오는 $N{=}20$회 반복 수행되며, 모든 실험은 공통된 초기 조건에서 시작한다.  
-분석 구간은 시뮬레이션 시작 후 \SI{30}{s}부터 \SI{120}{s}까지로 설정하였다.  
+각 시나리오는 공통된 초기 조건에서 시작하며, $N{=}20$회 반복 수행하였다.
+시뮬레이션은 워밍업 구간(0–10 s)과 과도응답 구간(10–30 s)을 거친 후,
+\SI{30}{s}부터 \SI{120}{s}까지의 구간을 분석 대상으로 설정하였다.
 
-평가 지표는 다음과 같다:  
-Peak-to-Peak(\si{\micro\second}), 포화율(\%), Attitude RMS/95th(\si{\degree}),  
-Steady yaw-rate(\si{\radian\per\second}), cp/cr/cy 명령(\si{\micro\second}),  
-지연 및 지터(\si{\milli\second}).  
-모든 지표는 워밍업 구간(\SI{10}{s}) 이후 동일한 분석 윈도우 내에서 산출하였다.  
-여기서 cp, cr, cy는 믹서 기준의 pitch/roll/yaw 축 성분 명령(\si{\micro\second})을 의미한다.
+평가 지표는 다음과 같다.  
+(1) \textbf{Peak-to-Peak}(\si{\micro\second}): 모터 PWM 신호의 최대–최소 차이.  
+(2) \textbf{포화율}(\%): 정규화 제어 명령의 경계 근접 점유율로 정의하며, \(|u| \ge 0.99\) (허용 범위 \(\pm1\%\)) 구간의 시간 비율.  
+(3) \textbf{Attitude RMS/95th}(\si{\degree}): 명령 자세 대비 실제 자세 오차의 RMS 및 95번째 백분위값.  
+(4) \textbf{Steady yaw rate}(\si{\radian\per\second}): 분석 구간 후반(90–120 s)의 평균 yaw 속도.  
+(5) \textbf{cp/cr/cy 명령}(\si{\micro\second}): 믹서 입력 기준의 pitch, roll, yaw 축 명령 신호(1500 µs 중심값).  
+(6) \textbf{지연 및 지터}(\si{\milli\second}): 센서 수집부터 액추에이터 명령 송신까지의 엔드투엔드 지연 및 제어주기 지터.  
+
+모든 지표는 워밍업 구간 이후 동일한 분석 윈도우 내에서 계산하였으며,
+결과는 20회 반복 실험의 평균과 표준편차로 보고하였다.
+
 
 \subsection{핵심 파라미터}
 \begin{table}[htb]
@@ -577,7 +569,6 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]=
   \item \textbf{환경 고정}: 동일 PC/월드/\(\Delta t\), 스레드 우선순위 상향, Windows 타이머 분해능 1 ms, 패킷 크기 고정(Nagle 옵션 명시)
 \end{itemize}
 RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스택 오버헤드로 인해 목표 루프 주파수에 안정적으로 도달하기 어려웠고, 공유메모리(SPSC, zero-copy)를 사용하는 \emph{SIL 제어기}는 고주파(IMU \(\sim\!100\,kHz\), Barometer \(\sim\!100\,Hz\), PWM \(400\,Hz\))에서도 안정적으로 동작하였다.
-
 
 
 요약하면, RPC 경로는 \emph{[한계 요약 예: IMU \(\approx\) 600--800 Hz, PWM \(\approx\) 100--200 Hz]} 수준에 머문 반면, 공유메모리 경로는 목표 주파수를 일관되게 유지하였다. 이 결과는 제어기/필터 블록을 \emph{SIL 제어기}에서 검증 후 실제 FC에 소스 수준으로 신속 이식할 수 있음을 뒷받침한다.
