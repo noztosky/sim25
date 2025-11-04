@@ -191,9 +191,6 @@ ArduPilot과 PX4는 외부 자세 제어 루프(P)와 내부 각속도 제어 �
 포화 또는 Slew rate 제한이 존재하는 액추에이터에서는 적분기의 과적분이 오버슈트와 긴 복구 시간을 유발할 수 있다. 이를 방지하기 위해 적분 제한(clamping), 백계산 기반 추종형 anti-windup(back-calculation), 조건부 적분(conditional integration), I-freeze/decay(포화 시 적분 동결·감쇠), 그리고 목표치나 제어 게인 변경 시 출력 불연속을 완화하기 위한 \emph{bumpless transfer} 등이 적용된다. 멀티로터에서도 속도 루프의 정상상태 바이어스를 제거하기 위해 rate-PI 제어에 anti-windup을 일반적으로 적용한다 [3], [4].
 
 \subsection{D-term 필터링과 미분 성형}
-미분은 고주파 노이즈·진동 모드에 민감하므로 PT1/PT2 저역통과, 정적/동적 노치(dyn-notch), 미분 성형(differentiator shaping)으로 고주파 성분을 억제한다. 실무에서는 D-term 전용 필터 체인과 D-클램프를 함께 적용하고, 모터 Slew 제한으로 단발 스파이크와 포화 점유율을 줄인다 [5], [6].
-
-\subsection{D-term 필터링과 미분 성형}
 미분항은 고주파 노이즈와 기체의 고유 진동 모드에 특히 민감하므로, D-term 전용 저역통과(PT1/PT2), 정적/동적 노치(dyn-notch; 모터 RPM/고조파 추적), 그리고 차분기 성형(differentiator shaping; lead–lag/biquad 기반)을 조합해 고주파 성분을 억제한다. 실무에서는 (i) 자이로 전역 필터와 분리된 D-term 전용 필터 체인을 구성하고, (ii) 스파이크 억제를 위해 D-클램프(D 출력 한계/소프트 리미트)를 병행하며, (iii) 모터 Slew rate 제한으로 단발 스파이크와 포화 점유율을 줄인다. 또한 D-term은 일반적으로 측정값(각속도) 기반 미분으로 구현되므로, 필터 차수·차단주파수 선택 시 위상 지연과 이득 여유를 함께 고려해야 한다 [5], [6].
 
 \subsection{소스 전환(EST/GT)과 연속 블렌딩}
@@ -204,7 +201,7 @@ ArduPilot과 PX4는 외부 자세 제어 루프(P)와 내부 각속도 제어 �
 
 \section{방법/시스템 구현}
 \subsection{시스템 개요}
-본 시스템은 AirSim–공유 메모리–SIL 제어기로 구성된 파이프라인을 통해 타임스탬프가 부여된 텔레메트리 스트림을 약 1 kHz로 수신하고, PWM 구동 명령을 400 Hz로 송신하도록 설계하였다. 단일 생산자–단일 소비자(SPSC) 링버퍼 구조, 비블로킹 소비(non-blocking consume), zero-copy 전달, 고해상도 시계(high-resolution clock) 동기화를 적용하여 통신 지연과 지터를 최소화하였다. 본 논문에서 사용하는 기호는 다음과 같다: $q$는 자세 쿼터니언, $e_x, e_y$는 소각 오차(small-angle attitude error), 그리고 $\omega_{x,\mathrm{ref}}, \omega_{y,\mathrm{ref}}$는 각속도 참조 신호를 각각 나타낸다.
+본 시스템은 AirSim–공유 메모리–SIL 제어기로 구성된 파이프라인을 통해 타임스탬프가 부여된 텔레메트리 스트림을 루프 기준 1 kHz로 수신(벤치마크 시 IMU 퍼블리셔는 \(\sim\!100\,kHz\)까지 지원)하고, PWM 구동 명령을 400 Hz로 송신하도록 설계하였다. 단일 생산자–단일 소비자(SPSC) 링버퍼 구조, 비블로킹 소비(non-blocking consume), zero-copy 전달, 고해상도 시계(high-resolution clock) 동기화를 적용하여 통신 지연과 지터를 최소화하였다. 본 논문에서 사용하는 기호는 다음과 같다: $q$는 자세 쿼터니언, $e_x, e_y$는 소각 오차(small-angle attitude error), 그리고 $\omega_{x,\mathrm{ref}}, \omega_{y,\mathrm{ref}}$는 각속도 참조 신호를 각각 나타낸다.
 
 \begin{figure}[H]
 \centering
@@ -255,7 +252,7 @@ ArduPilot과 PX4는 외부 자세 제어 루프(P)와 내부 각속도 제어 �
 
 \subsection{AirSim 센서(IMU, BARO, MAG)}
 
-AirSim에서 생성된 센서 데이터는 운영체제 공유 메모리(IPC) 세그먼트에 \emph{producer}로서 기록된다. IMU(ACC, GYRO)는 고주기(≈1 kHz), 반면 기압계(BARO)와 자기계(MAG)는 중·저주기(예: 10–100 Hz)로 샘플링되며, 모든 레코드는 지연 최소화를 위한 고해상도 타임스탬프를 포함한다. 센서 종류가 다르더라도 동일한 IPC 경로를 사용하도록 설계하여, 센서별 주파수만 다르게 운용할 수 있다.
+AirSim에서 생성된 센서 데이터는 운영체제 공유 메모리(IPC) 세그먼트에 \emph{producer}로서 기록된다. IMU(ACC, GYRO)는 고주기(기본 1 kHz, 벤치마크 시 \(\sim\!100\,kHz\))로, 반면 기압계(BARO)와 자기계(MAG)는 중·저주기(예: 10–100 Hz)로 샘플링되며, 모든 레코드는 지연 최소화를 위한 고해상도 타임스탬프를 포함한다. 센서 종류가 다르더라도 동일한 IPC 경로를 사용하도록 설계하여, 센서별 주파수만 다르게 운용할 수 있다.
 
 \subsection{Shared Memory (OS IPC)}
 
@@ -341,15 +338,11 @@ Shared Memory는 AirSim이 생성·소유하고 SIL 제어기가
   \item \textbf{종료 및 분석:} 종료 시 로그의 무결성을 검사한다 (타임스탬프 단조 증가, 샘플 수, 누락률 등). 이상이 없을 경우 분석 스크립트를 통해 성능 지표를 산출한다.
 \end{enumerate}
 
-\subsubsection{핵심 파라미터}
-세부 파라미터 값 및 실험 조건은 섹션~4.6의 표~\ref{tab:key_params_xe}를 참조한다. 
-각 제어 루프 및 필터의 주요 게인, 한계값, 시간상수 등이 포함된다.
-
 \subsubsection{실행 화면}
 \begin{figure}[htb]
   \centering
-  % \includegraphics[width=\columnwidth]{images/run_screen.png}
-  \caption{실행 화면 예시 (루프 주파수 및 상태 지표).}
+  \includegraphics[width=\columnwidth]{img/xsim_test.png}
+  \caption{비행 중 주파수 측정 화면: IMU, MAG, BARO, LOC, PWM (Hz) 로그.}
 \end{figure}
 
 \subsection{구현 핵심 요약 및 코드 발췌}
@@ -357,180 +350,137 @@ Shared Memory는 AirSim이 생성·소유하고 SIL 제어기가
 \subsubsection{Shared Memory 기반 write/read 흐름 (Producer–Consumer 구조)}
 
 \noindent\textbf{IMU Producer (AirSim)}
-\begin{lstlisting}[language=C++,caption={IMU producer},label=lst:imu_producer]
-// Pseudocode
+\begin{lstlisting}[language=C++, caption={IMU producer pseudocode}, label=lst:imu_producer]
+// IMU producer pseudocode (executed at simulation rate)
 struct ImuSample { 
-  int64_t ts_ns; 
-  float ax, ay, az; 
-  float gx, gy, gz; 
+  int64_t ts_ns;           // timestamp [ns]
+  float ax, ay, az;        // acceleration [m/s^2]
+  float gx, gy, gz;        // angular velocity [rad/s]
 };
 
-SpscQueue<ImuSample> imuQ;  // in-process shared memory backed
+SpscQueue<ImuSample> imuQ; // single-producer, single-consumer queue (shared memory)
 
 void onSimStep() {
   ImuSample s;
   s.ts_ns = nowNanos();
   readImu(&s.ax, &s.ay, &s.az, &s.gx, &s.gy, &s.gz);
-  imuQ.try_enqueue(s);  // non-blocking enqueue; drops if full
+  imuQ.try_enqueue(s);     // non-blocking enqueue; drops oldest if full
 }
 \end{lstlisting}
 
+
 \noindent\textbf{IMU Consumer (SIL Controller)}
-\begin{lstlisting}[language=C++,caption={IMU consumer},label=lst:imu_consumer]
+\begin{lstlisting}[language=C++, caption={IMU consumer}, label=lst:imu_consumer]
 optional<ImuSample> tryReadImu() {
   ImuSample s;
-  if (imuQ.try_dequeue(s)) return s;
-  return nullopt;  // keep last sample
+  if (imuQ.try_dequeue(s))
+    return s;                // new IMU sample available
+  return nullopt;            // no new sample; caller keeps previous one
 }
 \end{lstlisting}
 
 \noindent\textbf{PWM Producer (SIL Controller)}
-\begin{lstlisting}[language=C++,caption={PWM producer},label=lst:pwm_producer]
+\begin{lstlisting}[language=C++, caption={PWM producer}, label=lst:pwm_producer]
 struct PwmCmd { 
-  int64_t ts_ns; 
-  uint16_t m[4]; 
+  int64_t ts_ns;             // timestamp [ns]
+  uint16_t m[4];             // motor PWM outputs [µs]
 };
 
-SpscQueue<PwmCmd> pwmQ;
+SpscQueue<PwmCmd> pwmQ;      // single-producer, single-consumer queue
 
-void onControlStep() {
+void onControlStep() {       // called at controller rate (e.g., 400 Hz)
   PwmCmd c{ nowNanos(), mixOutputs() };
-  pwmQ.try_enqueue(c);
+  pwmQ.try_enqueue(c);       // non-blocking; may drop command if full
 }
 \end{lstlisting}
+
 
 \noindent\textbf{PWM Consumer (AirSim)}
-\begin{lstlisting}[language=C++,caption={PWM consumer},label=lst:pwm_consumer]
+\begin{lstlisting}[language=C++, caption={PWM consumer pseudocode}, label=lst:pwm_consumer]
+// Reads motor commands from shared memory and applies to rotor model
 void onRotorUpdate() {
   PwmCmd c;
-  if (pwmQ.try_dequeue(c)) applyPwm(c.m);
+  if (pwmQ.try_dequeue(c))
+    applyPwm(c.m);           // update motor model with latest PWM [µs]
 }
 \end{lstlisting}
 
-\subsubsection{Mahony 자세 추정 핵심 (EMA, 바이어스 추정)}
+\subsubsection{Mahony 자세 추정 핵심 (EMA 및 바이어스 추정)}
 \begin{itemize}
-  \item 매 스텝에서 \(\Delta t\) 적분을 수행하며, 쿼터니언의 정규화를 유지한다.
-  \item \(|a|\!\approx\!g\) 구간에서만 가속도 신뢰도(weight)를 적용하고, 해당 신뢰도는 \(\tau\) 기반 EMA로 스무딩한다.
-  \item 정지 또는 저가속 구간에서는 자이로 바이어스를 EMA로 온라인 추정한다 (online bias tracking).
+  \item 각 시점에서 자이로스코프 측정값을 이용해 쿼터니언을 시간 간격 \(\Delta t\) 동안 적분하고, 수치적 오차 누적을 방지하기 위해 매 스텝 정규화를 수행한다.
+  \item 가속도 벡터의 크기가 중력 크기(\(|a|\!\approx\!g\))에 근접한 구간에서만 가속도 기반 보정 게인을 적용하며, 이때의 신뢰도(weight)는 시상수 \(\tau\)를 갖는 지수이동평균(EMA)으로 시간적으로 평활화한다.
+  \item 정지 또는 저가속 상태에서는 자이로 바이어스를 EMA 형태로 온라인 추정하여 장기 드리프트를 점진적으로 보정한다 (online bias tracking).
 \end{itemize}
 
-\begin{lstlisting}[language=C++,caption={Mahony update loop (EMA, bias estimation)},label=lst:mahony_core]
+\begin{lstlisting}[language=C++, caption={Mahony update loop with EMA-based accel trust and bias estimation}, label=lst:mahony_core]
 struct Mahony {
-  Quat q;           // attitude quaternion
-  Vec3 bias;        // gyro bias
-  Vec3 integ;       // I-term accumulator
-  float kp, ki;     // base gains
+  Quat  q;          // attitude quaternion
+  Vec3  bias;       // gyro bias estimate
+  Vec3  integ;      // integral (I-term) accumulator
+  float kp, ki;     // proportional & integral gains
   float tau_w;      // EMA time-constant for accel-trust
 };
 
 void update(Mahony& m, const ImuSample& s, int64_t prev_ns) {
   float dt = max(1e-4f, (s.ts_ns - prev_ns) * 1e-9f);
 
-  // 1) Normalize accelerometer and compute gravity error
+  // (1) Normalize accelerometer and compute gravity misalignment
   Vec3 a = normalize({s.ax, s.ay, s.az});
   Vec3 g_ref = rotate(conj(m.q), {0, 0, 1});
-  Vec3 e = cross(a, g_ref);  // direction to align sensed gravity with body-z
+  Vec3 e = cross(a, g_ref);                 // direction to align sensed gravity with body-z
 
-  // 2) Accel-trust smoothing (EMA)
-  float alpha = 1.f - expf(-dt / m.tau_w);  // 0..1
-  float trust_raw = clamp(1.f - fabsf(length(a) - 1.f), 0.f, 1.f);  // |a|~g -> high trust
-  static float trust = 0.f; 
+  // (2) Exponential moving average (EMA) for accel-trust
+  float alpha = 1.f - expf(-dt / m.tau_w);  // 0..1 smoothing factor
+  float trust_raw = clamp(1.f - fabsf(length(a) - 1.f), 0.f, 1.f);  // |a|≈g → high trust
+  static float trust = 0.f;
   trust = (1 - alpha) * trust + alpha * trust_raw;
 
-  // 3) PI correction on gyro
+  // (3) PI correction on gyro signal
   m.integ += (m.ki * trust) * e * dt;
   Vec3 omega = {s.gx, s.gy, s.gz} - m.bias + (m.kp * trust) * e + m.integ;
 
-  // 4) Integrate attitude and normalize
-  m.q = integrateOmega(m.q, omega, dt);  // e.g., small-angle or exponential map
+  // (4) Integrate quaternion and renormalize
+  m.q = integrateOmega(m.q, omega, dt);     // small-angle or exponential map integration
   m.q = normalize(m.q);
 
-  // 5) Gyro bias EMA (applied only in low-dynamics)
+  // (5) Online gyro bias update (EMA) under quasi-static condition
   bool still = (length({s.gx, s.gy, s.gz}) < 0.15f) && (fabsf(length(a) - 1.f) < 0.1f);
   if (still) {
-    float beta = 0.02f;  // bias EMA rate
+    float beta = 0.02f;                     // bias EMA rate
     m.bias = (1 - beta) * m.bias + beta * ({s.gx, s.gy, s.gz} - omega);
   }
 }
 \end{lstlisting}
 
 \subsection{시나리오 정의}
+본 연구에서는 필터의 강건성 및 외란 내성(robustness and disturbance rejection)을 평가하기 위해 
+다음의 네 가지 시나리오를 구성하였다.
 \begin{enumerate}[label=S\arabic*]
-  \item \textbf{Hover}: 정지 호버 (외란 없음).
-  \item \textbf{Gyro Bias}: 자이로 오프셋 주입 (\(\pm0.02\!\sim\!0.05\,\si{rad/s}\)).
-  \item \textbf{Dynamic Accel}: 가속도 외란 (\(0.3\!\sim\!0.8\,g\)), 주파수 범위 (\(0.5\!\sim\!2\,\si{Hz}\)).
-  \item \textbf{Aggressive Tilt}: 기울기 급가감 (예: \(20\!\sim\!35^{\circ}\) 명령 램프 또는 스텝 입력).
+  \item \textbf{Hover}: 외란이 없는 정지 호버 상태로, 필터의 정상상태 안정성과 잔류 진동 수준을 평가한다.
+  \item \textbf{Gyro Bias}: 자이로 바이어스(\(\pm0.02\!\sim\!0.05\,\si{rad/s}\))를 인위적으로 주입하여, 오프셋 보정 성능 및 장기 안정성을 검증한다.
+  \item \textbf{Dynamic Accel}: \(0.3\!\sim\!0.8\,g\) 진폭, \(0.5\!\sim\!2\,\si{Hz}\) 주파수 범위의 가속도 외란을 인가하여, 가속도 기반 보정 루프의 외란 내성을 평가한다.
+  \item \textbf{Aggressive Tilt}: \(20\!\sim\!35^{\circ}\) 범위의 급격한 자세 명령(램프 또는 스텝 입력)을 통해, 큰 각속도·가속도 조건에서의 필터 수렴 특성을 분석한다.
 \end{enumerate}
 
-모든 시나리오는 워밍업 \SI{10}{s} 이후 분석되며,  
-세부 반복 횟수 및 분석 윈도우는 섹션~4.6 (프로토콜 및 지표)에 따른다.
+모든 시나리오는 워밍업 \SI{10}{s} 이후 분석되며, 
+세부 반복 횟수와 분석 윈도우는 섹션~\ref{sec:protocol_metrics}(프로토콜 및 지표)에 따른다.
 
-\subsection{비교군 구성}
-\begin{table}[htb]
-\centering
-\caption{Baseline과 Proposed 구성 비교}
-\label{tab:baseline_proposed}
-\begin{tabular}{lll}
-\toprule
-항목 & Baseline & Proposed \\
-\midrule
-D-term 필터 & PT1 & PT2$\times$2+Clamp \\
-Trim & 즉시 & 3 s 관측 $\rightarrow$ 0.8 s 램프 \\
-추정기 게인 & 계단 & EMA \\
-EST/GT 전환 & 이산 & 연속 블렌딩 \\
-Slew 제한 (\si{\micro s}) & 8 & 4 \\
-Yaw 루프 & D 중심 & Rate-PI (anti-windup) \\
-\bottomrule
-\end{tabular}
-\end{table}
 
-\paragraph{실측 결과(본 작업)} 다음의 설정과 구현으로 얻은 수치이다: 링버퍼 용량 1 (CAP=1), SHM 퍼블리셔(IMU) 목표 100 kHz, PWM 목표 400 Hz, Barometer/Magnetometer 목표 100 Hz.
-\begin{table}[H]
-\centering
-\caption{CAP=1 조건 실측 요약}
-\label{tab:cap1_shm_rpc}
-\begin{tabular}{lcccc}
-\toprule
-경로 & IMU(Hz) & BARO(Hz) & MAG(Hz) & PWM(Hz) \\
-\midrule
-SHM & 78383 & 100.000 & 100.000 & 400.000 \\
-RPC & 15516 & 99.9968 & 99.9968 & 339.987 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{프로토콜 및 지표}\label{sec:protocol_metrics}
+각 시나리오는 공통된 초기 조건에서 시작하며, $N{=}20$회 반복 수행하였다.
+시뮬레이션은 워밍업 구간(0–10 s)과 과도응답 구간(10–30 s)을 거친 후,
+\SI{30}{s}부터 \SI{120}{s}까지의 구간을 분석 대상으로 설정하였다.
 
-수치 값의 정의 및 적용 위치는 섹션~4.6의 표~\ref{tab:key_params_xe}를 따른다.
+평가 지표는 다음과 같다.  
+(1) \textbf{Peak-to-Peak}(\si{\micro\second}): 모터 PWM 신호의 최대–최소 차이.  
+(2) \textbf{포화율}(\%): 정규화 제어 명령의 경계 근접 점유율로 정의하며, \(|u| \ge 0.99\) (허용 범위 \(\pm1\%\)) 구간의 시간 비율.  
+(3) \textbf{Attitude RMS/95th}(\si{\degree}): 명령 자세 대비 실제 자세 오차의 RMS 및 95번째 백분위값.  
+(4) \textbf{Steady yaw rate}(\si{\radian\per\second}): 분석 구간 후반(90–120 s)의 평균 yaw 속도.  
+(5) \textbf{cp/cr/cy 명령}(\si{\micro\second}): 믹서 입력 기준의 pitch, roll, yaw 축 명령 신호(1500 µs 중심값).  
+(6) \textbf{지연 및 지터}(\si{\milli\second}): 센서 수집부터 액추에이터 명령 송신까지의 엔드투엔드 지연 및 제어주기 지터.  
 
-\subsection{프로토콜 및 지표}
-각 시나리오는 $N{=}20$회 반복 수행되며, 모든 실험은 공통된 초기 조건에서 시작한다.  
-분석 구간은 시뮬레이션 시작 후 \SI{30}{s}부터 \SI{120}{s}까지로 설정하였다.  
-
-평가 지표는 다음과 같다:  
-Peak-to-Peak(\si{\micro\second}), 포화율(\%), Attitude RMS/95th(\si{\degree}),  
-Steady yaw-rate(\si{\radian\per\second}), cp/cr/cy 명령(\si{\micro\second}),  
-지연 및 지터(\si{\milli\second}).  
-모든 지표는 워밍업 구간(\SI{10}{s}) 이후 동일한 분석 윈도우 내에서 산출하였다.  
-여기서 cp, cr, cy는 믹서 기준의 pitch/roll/yaw 축 성분 명령(\si{\micro\second})을 의미한다.
-
-\subsection{핵심 파라미터}
-\begin{table}[htb]
-\centering
-\caption{실험에 사용된 핵심 파라미터}
-\begin{tabular}{ll}
-\toprule
-항목 & 설정값 \\
-\midrule
-EST/GT 오차 임계값 & \SI{5}{\degree} \\
-블렌딩(EMA) 상수 & $\tau \approx \SI{0.25}{s}$, $\alpha_{\max}=0.25$ \\
-Attitude 데드존 & \SI{0.005}{rad} \\
-D-클램프 범위 & $\pm \SI{12}{\micro\second}$ \\
-Trim(관측/램프/한계) & \SI{3}{s} / \SI{0.8}{s} / $\pm \SI{50}{\micro\second}$ \\
-각도→출력 변환비 & \SI{80}{\micro\second\per rad} \\
-Slew-rate 제한 & \SI{4}{\micro\second\per step} \\
-\bottomrule
-\end{tabular}
-\label{tab:key_params_xe}
-\end{table}
+모든 지표는 워밍업 구간 이후 동일한 분석 윈도우 내에서 계산하였으며,
+결과는 20회 반복 실험의 평균과 표준편차로 보고하였다.
 
 
 % (삭제) 섹션 IV 수치 교차참조 표는 본문 서술로 대체
@@ -569,6 +519,7 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]=
 
 
 \subsubsection{통신 경로 비교: RPC vs Shared Memory}
+\noindent\textbf{비교군/설정}: CAP=1 조건에서 동일 PC/월드/\(\Delta t\)로 RPC 경로와 Shared Memory(SPSC, zero-copy) 경로를 비교하였다.\\
 \noindent\textbf{측정 방법(센서 스캔 주파수)}:\ 
 각 경로(RPC/Shared Memory)에서 센서 입력(IMU, Barometer)과 PWM 출력에 대해 레코드의 타임스탬프(ts\_ns)를 사용해 유효 주파수를 산출하였다. 공정 비교를 위해 60--120 s 분석 윈도우에서 평균/분산을 측정하고, 드롭/오버라이트 비율을 함께 기록하였다.
 \begin{itemize}
@@ -579,11 +530,10 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]=
 RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스택 오버헤드로 인해 목표 루프 주파수에 안정적으로 도달하기 어려웠고, 공유메모리(SPSC, zero-copy)를 사용하는 \emph{SIL 제어기}는 고주파(IMU \(\sim\!100\,kHz\), Barometer \(\sim\!100\,Hz\), PWM \(400\,Hz\))에서도 안정적으로 동작하였다.
 
 
+요약하면, RPC 경로는 직렬화·컨텍스트 스위칭·네트워킹 오버헤드로 인해 목표 주파수 달성이 어려운 반면, 공유메모리 경로는 목표 주파수를 일관되게 유지하였다. 이 결과는 제어기/필터 블록을 \emph{SIL 제어기}에서 검증 후 실제 FC에 소스 수준으로 신속 이식할 수 있음을 뒷받침한다.
 
-요약하면, RPC 경로는 \emph{[한계 요약 예: IMU \(\approx\) 600--800 Hz, PWM \(\approx\) 100--200 Hz]} 수준에 머문 반면, 공유메모리 경로는 목표 주파수를 일관되게 유지하였다. 이 결과는 제어기/필터 블록을 \emph{SIL 제어기}에서 검증 후 실제 FC에 소스 수준으로 신속 이식할 수 있음을 뒷받침한다.
-
-\subsubsection{루프 주파수 달성(External Virtual FC)}
-외부 프로그램(\emph{Virtual FC})에서 실행한 고주파 폐루프의 달성 주파수는 다음과 같다: IMU \(\approx\!1000\,\mathrm{Hz}\), Barometer \(\approx\!100\,\mathrm{Hz}\), PWM \(\approx\!400\,\mathrm{Hz}\). 워밍업 \SI{10}{s}를 제외한 동일 분석 윈도우에서의 내부 모니터 로그 발췌는 아래와 같다.
+\subsubsection{통신 경로 비교 요약 및 로그(External Virtual FC)}
+아래 표는 RPC와 Shared Memory 경로의 측정 주파수를 요약하며(표~\ref{tab:rpc_shm_rates}), 이어지는 로그는 SHM 기반 루프의 발췌 예시이다. 워밍업 \SI{10}{s}를 제외한 동일 분석 윈도우에서 수집하였다.
 
 \begin{lstlisting}[caption={실제 로그 발췌(hover\_bias, 10 Hz 요약)},label=lst:rate_log,breakindent=0pt,breakautoindent=false]
 hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1597 1599 1601 1602 est[r p y]= 0.00 -0.00 -0.00 gt[r p y]= 0.00 -0.00 -0.00 yaw[rate,cy]= -0.00,0.00 cp/cr(us)= 0.00/-0.00
@@ -593,15 +543,16 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1598 1602 1601 est[r p y]=
 
 \begin{table}[htb]
 \centering
-\caption{루프 주파수 달성(평균 및 변동 범위)}
-\label{tab:loop_rates}
+\caption{통신 경로 비교: RPC vs Shared Memory (Hz)}
+\label{tab:rpc_shm_rates}
 \begin{tabular}{lcc}
 \toprule
-루프 & 평균(Hz) & 변동(Hz) \\
+항목 & RPC (Hz) & SHM (Hz) \\
 \midrule
-Inertial Measurement Unit (IMU) & 1000 & $\leq$ 5 \\
-Barometer & 100 & $\leq$ 1 \\
-PWM & 400 & $\leq$ 2 \\
+IMU & 14586 & 98600 \\
+Barometer & 100.000 & 100.000 \\
+Magnetometer & 100.000 & 100.000 \\
+PWM & 340.0 & 400.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
