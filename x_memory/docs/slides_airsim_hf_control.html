@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>AirSim 연동 고주파 제어 벤치마크·안정화 툴킷</title>
+    <link rel="stylesheet" href="https://unpkg.com/reveal.js@5/dist/reveal.css" />
+    <link rel="stylesheet" href="https://unpkg.com/reveal.js@5/dist/theme/black.css" id="theme" />
+    <style>
+      :root { --r-main-font: 'Noto Sans KR', 'Segoe UI', Arial, sans-serif; }
+      .reveal { font-size: 30px; }
+      .reveal h1, .reveal h2, .reveal h3 { text-transform: none; }
+      .reveal section img { border: 0; box-shadow: none; }
+      .reveal table { font-size: 0.8em; }
+      .footnote { font-size: 0.55em; opacity: 0.8; }
+      .small { font-size: 0.8em; }
+      .xsmall { font-size: 0.65em; }
+      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; background: #2d7; color: #000; font-size: 0.6em; margin-left: 8px; }
+      .metric { font-size: 0.9em; line-height: 1.45; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace; }
+      html, body { background: #1e1e1e !important; }
+      .reveal { background: #1e1e1e !important; }
+      .reveal .slides { background: transparent; }
+    </style>
+  </head>
+  <body>
+    <div class="reveal">
+      <div class="slides">
+
+        <!-- 1. Title -->
+        <section>
+          <h1>AirSim 연동 고주파 제어<br/>벤치마크·안정화 툴킷</h1>
+          <p class="small">AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit</p>
+          <aside class="notes">
+            논문 목적과 핵심 기여를 한 문장으로 소개: 공유메모리 기반 AirSim–SIL 고주파 폐루프와 안정화 기법 제공.
+          </aside>
+        </section>
+
+        <!-- 2. 배경/문제 정의 -->
+        <section>
+          <h2>배경 · 문제 정의</h2>
+          <div class="two-col" style="align-items:center;">
+            <div>
+              <div style="height:260px; overflow:hidden;">
+                <!-- Inline SVG: Drone + arrows (down, bias, vibration) -->
+                <svg viewBox="0 0 900 260" preserveAspectRatio="xMidYMid meet" style="width:100%; height:100%;" role="img" aria-label="Drone arrows and vibration">
+                  <defs>
+                    <style>
+                      .ground{fill:none; stroke:#777; stroke-width:3}
+                      .dr{fill:none; stroke:#ddd; stroke-width:3}
+                      .rotor{fill:none; stroke:#bbb; stroke-width:2}
+                      .good{fill:none; stroke:#4ea1f3; stroke-width:5; marker-end:url(#ahGood)}
+                      .bias{fill:none; stroke:#e55; stroke-width:5; marker-end:url(#ahBias)}
+                      .vibe{fill:none; stroke:#ffd166; stroke-width:4}
+                    </style>
+                    <marker id="ahGood" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                      <polygon points="0 0, 6 2, 0 4" fill="#4ea1f3"></polygon>
+                    </marker>
+                    <marker id="ahBias" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                      <polygon points="0 0, 6 2, 0 4" fill="#e55"></polygon>
+                    </marker>
+                  </defs>
+                  <!-- ground -->
+                  <line class="ground" x1="60" y1="220" x2="840" y2="220"></line>
+                  <!-- drone (simple quadcopter) -->
+                  <g transform="translate(450,80) scale(1.3)">
+                    <circle class="dr" cx="0" cy="0" r="18"></circle>
+                    <line class="dr" x1="-35" y1="-35" x2="35" y2="35"></line>
+                    <line class="dr" x1="35" y1="-35" x2="-35" y2="35"></line>
+                    <circle class="rotor" cx="-45" cy="-45" r="10"></circle>
+                    <circle class="rotor" cx="45" cy="-45" r="10"></circle>
+                    <circle class="rotor" cx="-45" cy="45" r="10"></circle>
+                    <circle class="rotor" cx="45" cy="45" r="10"></circle>
+                  </g>
+                  <!-- arrows: down and bias -->
+                  <line class="good" x1="450" y1="98" x2="450" y2="215"></line>
+                  <line class="bias" x1="450" y1="98" x2="520" y2="215"></line>
+                  <!-- vibration: vertical zigzag -->
+                  <polyline class="vibe" points="380,120 370,140 390,160 370,180 390,200 380,220"></polyline>
+                </svg>
+              </div>
+              <div style="height:360px; margin-top:16px; overflow:hidden;">
+                <svg viewBox="0 0 900 360" preserveAspectRatio="xMidYMid meet" style="width:100%; height:100%;" role="img" aria-label="RPC vs SHM overview">
+                  <defs>
+                    <style>
+                      .bx{fill:#2a2a2a;stroke:#666;stroke-width:2;rx:10;ry:10}
+                      .lblBg{font: 22px 'Noto Sans KR', Arial, sans-serif; fill:#fff; text-anchor:middle}
+                      .subl{font: 16px 'Noto Sans KR', Arial, sans-serif; fill:#bbb; text-anchor:middle}
+                      .arrowR{fill:none; stroke:#e55; stroke-width:4; marker-end:url(#ahR)}
+                      .arrowG{fill:none; stroke:#2dd36f; stroke-width:4; marker-end:url(#ahG)}
+                    </style>
+                    <marker id="ahR" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                      <polygon points="0 0, 6 2, 0 4" fill="#e55"></polygon>
+                    </marker>
+                    <marker id="ahG" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                      <polygon points="0 0, 6 2, 0 4" fill="#2dd36f"></polygon>
+                    </marker>
+                  </defs>
+                  <!-- RPC row -->
+                  <rect class="bx" x="40" y="30" width="300" height="70"></rect>
+                  <text class="lblBg" x="190" y="75">AirSim</text>
+                  <rect class="bx" x="560" y="30" width="300" height="70"></rect>
+                  <text class="lblBg" x="710" y="75">SIL Controller</text>
+                  <line class="arrowR" x1="340" y1="65" x2="560" y2="65"></line>
+                  <text class="subl" x="450" y="50">RPC</text>
+                  <text class="subl" x="450" y="85">지연·지터 ↑</text>
+                  <text class="subl" x="710" y="115">고주파 유지 어려움(>15 kHz)</text>
+                  <!-- SHM row -->
+                  <rect class="bx" x="40" y="210" width="300" height="70"></rect>
+                  <text class="lblBg" x="190" y="255">AirSim</text>
+                  <rect class="bx" x="560" y="210" width="300" height="70"></rect>
+                  <text class="lblBg" x="710" y="255">SIL Controller</text>
+                  <rect class="bx" x="360" y="210" width="140" height="70"></rect>
+                  <text class="subl" x="430" y="246">Shared</text>
+                  <text class="subl" x="430" y="266">Memory (SPSC)</text>
+                  <line class="arrowG" x1="340" y1="245" x2="360" y2="245"></line>
+                  <line class="arrowG" x1="500" y1="245" x2="560" y2="245"></line>
+                  <text class="subl" x="710" y="295">IMU≈1 kHz · PWM 400 Hz</text>
+                </svg>
+              </div>
+            </div>
+            <div>
+              <ul>
+                <li>자세 제어시 비대칭, 센서 바이어스, 스파이크 및 드리프트 발생</li>
+                <li>현재 시뮬레이터–제어기 간 고주파 루프(>15 kHz) 유지 어려움</li>
+                <li><b>대안: </b> 프로세스 내 공유 메모리(SPSC, zero-copy) 기반 통합을 통해 <b>IMU≈100 kHz / PWM 400 Hz</b>의 안정적 루프 유지 가능</li>
+              </ul>
+              <aside class="notes">
+                기존 RPC 기반 구조의 한계를 짚고, 고주파 루프 유지를 위한 in-process 통합의 필요성과 효과를 강조합니다.
+              </aside>
+            </div>
+          </div>
+        </section>
+          
+
+        <!-- 3. 제안 개요 -->
+        <section>
+          <h2>제안: AirSim–공유메모리–SIL 고주파 폐루프</h2>
+          <div class="two-col" style="align-items:center;">
+            <div>
+              <div style="height:460px; overflow:hidden;">
+                <!-- Inline SVG: AirSim – Shared Memory – SIL block diagram (TikZ 대응) -->
+                <svg viewBox="0 0 1200 960" preserveAspectRatio="xMidYMid meet" style="width:100%; height:100%;" role="img" aria-label="AirSim–Shared Memory–SIL block diagram">
+              <defs>
+                <style>
+                  .box{fill:#f9f1a8;stroke:#555;stroke-width:2;rx:12;ry:12}
+                  .node{fill:#d9d9d9;stroke:#555;stroke-width:1.5;rx:8;ry:8}
+                  .side{fill:#d9d9d9;stroke:#555;stroke-width:1.5;rx:8;ry:8}
+                  .lblMain{font: 42px 'Noto Sans KR', bold, Arial, sans-serif; fill:#111; text-anchor:middle}
+                  .sublbl{font: 25px 'Noto Sans KR', Arial, sans-serif; fill:#111; text-anchor: middle;}
+                  .arrow-outline{fill:none; stroke:#fff; stroke-width:7; stroke-linecap:round; stroke-linejoin:round}
+                  .arrow{fill:none; stroke:#111; stroke-width:5; stroke-linecap:round; stroke-linejoin:round; marker-end:url(#arrowhead)}
+                </style>
+                <marker id="arrowhead" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                  <polygon points="0 0, 6 2, 0 4" fill="#111" stroke="#fff" stroke-width="1" stroke-linejoin="round"></polygon>
+                </marker>
+              </defs>
+
+              <!-- AirSim (top) -->
+              <rect class="box" x="100" y="40" width="1000" height="180"></rect>
+              <text class="lblMain" x="600" y="95">AirSim</text>
+              <rect class="node" x="220" y="115" width="380" height="60"></rect>
+              <text class="sublbl" x="410" y="150">Sensors—IMU BARO MAG</text>
+              <rect class="node" x="720" y="115" width="260" height="60"></rect>
+              <text class="sublbl" x="850" y="150">ROTOR — PWM</text>
+
+              <!-- Shared Memory -->
+              <rect class="node" x="300" y="270" width="600" height="60"></rect>
+              <text class="sublbl" x="600" y="308">Shared Memory (OS) — SPSC, zero-copy</text>
+
+              <!-- SIL Controller (bottom) -->
+              <rect class="box" x="100" y="390" width="1000" height="570"></rect>
+              <text class="lblMain" x="600" y="440" text-anchor="middle">SIL Controller</text>
+
+              <!-- Left column nodes -->
+              <rect class="node" x="220" y="500" width="400" height="60"></rect>
+              <text class="sublbl" x="420" y="538">Sensors — IMU, BARO, MAG</text>
+              <rect class="node" x="220" y="620" width="400" height="60"></rect>
+              <text class="sublbl" x="420" y="658">Mahony 자세 추정기 (EMA)</text>
+              <rect class="node" x="220" y="740" width="400" height="60"></rect>
+              <text class="sublbl" x="420" y="778">Attitude P</text>
+              <rect class="node" x="220" y="860" width="400" height="60"></rect>
+              <text class="sublbl" x="420" y="898">Rate PI + D (PT2×2, clamp)</text>
+
+              <!-- Right side controller box -->
+              <rect class="side" x="720" y="540" width="260" height="90"></rect>
+              <text class="sublbl" x="850" y="575">Controller</text>
+              <text class="sublbl" x="850" y="600">(400 Hz)</text>
+
+              <!-- Arrows -->
+              <!-- AirSim sensors -> SHM -->
+              <line class="arrow-outline" x1="350" y1="175" x2="350" y2="270"></line>
+              <line class="arrow" x1="350" y1="175" x2="350" y2="270"></line>
+              <!-- SHM -> AirSim PWM -->
+              <line class="arrow-outline" x1="850" y1="270" x2="850" y2="175"></line>
+              <line class="arrow" x1="850" y1="270" x2="850" y2="175"></line>
+              <!-- SHM -> SIL sensors -->
+              <line class="arrow-outline" x1="420" y1="330" x2="420" y2="500"></line>
+              <line class="arrow" x1="420" y1="330" x2="420" y2="500"></line>
+              <!-- Sensors -> Mahony -> AttP -> RatePID chain -->
+              <line class="arrow-outline" x1="420" y1="560" x2="420" y2="620"></line>
+              <line class="arrow" x1="420" y1="560" x2="420" y2="620"></line>
+              <line class="arrow-outline" x1="420" y1="680" x2="420" y2="740"></line>
+              <line class="arrow" x1="420" y1="680" x2="420" y2="740"></line>
+              <line class="arrow-outline" x1="420" y1="800" x2="420" y2="860"></line>
+              <line class="arrow" x1="420" y1="800" x2="420" y2="860"></line>
+              <!-- RatePID -> Controller (diagonal straight line) -->
+              <line class="arrow-outline" x1="620" y1="890" x2="850" y2="630"></line>
+              <line class="arrow" x1="620" y1="890" x2="850" y2="630"></line>
+              <!-- Controller -> SHM (PWM) -->
+              <line class="arrow-outline" x1="850" y1="540" x2="850" y2="330"></line>
+              <line class="arrow" x1="850" y1="540" x2="850" y2="330"></line>
+            </svg>
+              </div>
+            </div>
+            <div>
+              <div class="metric">
+                <p>IMU ≈ 1 kHz, Barometer/Magnetometer ≈ 100 Hz, GNSS 10 Hz, PWM 400 Hz<span class="badge">실현</span></p>
+                <ul>
+                  <li>SPSC(Single Producer Single Consumer) 링버퍼, 비블로킹, zero-copy, 고해상도 타임스탬프</li>
+                  <li>SIL 제어기: Attitude P + Rate PI + D(PT2×2) + anti-windup</li>
+                  <li>지연/지터 감소, 목표 주파수 유지, 스파이크·포화 점유율 저감</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <aside class="notes">
+            구조 요약과 핵심 수치(1 kHz/400 Hz)를 명시하고 RPC 대비 장점을 한 문장으로 대비합니다.
+          </aside>
+        </section>
+
+        <!-- 4. 파이프라인/IPC 설계 -->
+        <section>
+          <h2>파이프라인 · IPC 설계 및 센서 주파수 구성</h2>
+          <div style="height:2em;"></div>
+          <div class="two-col">
+            <div>
+              <ul>
+                <li>AirSim 프로세스가 xIMU/xBARO/xMAG/xNSS 데이터 생성</li>
+                <li>각 샘플에 센서타입 + 고해상도 타임스탬프(ts_ns) 부여</li>
+                <li>공유메모리 세그먼트(/ximu, /xbaro, /xmag, /xnss)에 SPSC 링버퍼로 write</li>
+                <li>non‑blocking, zero‑copy;</li>
+                <li>드롭/오버라이트율 모니터링, 모노토닉 시계로 동기</li>
+              </ul>
+            </div>
+            <div>
+              <table style="width:100%; font-size:0.85em; border-collapse:collapse;">
+                <thead>
+                  <tr style="border-bottom:1px solid #555;"><th style="text-align:left; padding:4px 6px;">센서</th><th style="text-align:right; padding:4px 6px;">주파수</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td style="padding:4px 6px;">xIMU</td><td style="text-align:right; padding:4px 6px;">1000 Hz</td></tr>
+                  <tr><td style="padding:4px 6px;">xBARO</td><td style="text-align:right; padding:4px 6px;">100 Hz</td></tr>
+                  <tr><td style="padding:4px 6px;">xMAG</td><td style="text-align:right; padding:4px 6px;">100 Hz</td></tr>
+                  <tr><td style="padding:4px 6px;">xNSS</td><td style="text-align:right; padding:4px 6px;">10 Hz</td></tr>
+                </tbody>
+              </table>
+              <div style="height:14px;"></div>
+              <!-- Mini vertical pipeline: AirSim -> SHM -> SIL with bidirectional arrows -->
+              <svg viewBox="0 0 420 220" preserveAspectRatio="xMidYMid meet" style="width:100%; height:220px;">
+                <defs>
+                  <style>
+                    .b{fill:#2a2a2a;stroke:#666;stroke-width:2;rx:10;ry:10}
+                    .t{font:18px 'Noto Sans KR', Arial, sans-serif; fill:#ddd; text-anchor:middle}
+                    .flow{fill:none; stroke:#aaa; stroke-width:3}
+                    .dotB{fill:#4ea1f3}
+                    .dotR{fill:#e55}
+                  </style>
+                </defs>
+                <rect class="b" x="70" y="10" width="280" height="50"></rect>
+                <text class="t" x="210" y="42">AirSim</text>
+                <rect class="b" x="70" y="85" width="280" height="50"></rect>
+                <text class="t" x="210" y="117">OS (Shared Memory)</text>
+                <rect class="b" x="70" y="160" width="280" height="50"></rect>
+                <text class="t" x="210" y="192">SIL Controller</text>
+                <!-- centered flow lines with animated dots -->
+                <line class="flow" x1="210" y1="60" x2="210" y2="85"></line>
+                <circle class="dotB" cx="210" cy="60" r="4">
+                  <animate attributeName="cy" values="60;85;60" dur="1.6s" repeatCount="indefinite" />
+                </circle>
+                <circle class="dotR" cx="210" cy="85" r="4">
+                  <animate attributeName="cy" values="85;60;85" dur="1.6s" repeatCount="indefinite" />
+                </circle>
+                <line class="flow" x1="210" y1="135" x2="210" y2="160"></line>
+                <circle class="dotB" cx="210" cy="135" r="4">
+                  <animate attributeName="cy" values="135;160;135" dur="1.6s" repeatCount="indefinite" />
+                </circle>
+                <circle class="dotR" cx="210" cy="160" r="4">
+                  <animate attributeName="cy" values="160;135;160" dur="1.6s" repeatCount="indefinite" />
+                </circle>
+              </svg>
+            </div>
+          </div>
+          <aside class="notes">
+            단일 생산자·소비자, zero-copy, 비블로킹의 의미와 드롭/오버라이트 감시 지표를 간단히 언급합니다.
+          </aside>
+        </section>
+
+        <!-- 5. 제어 구조 (Attitude P) -->
+        <section>
+          <h2>제어 구조 · Mahony 필터</h2>
+          <div style="height:2em;"></div>
+          <div class="two-col" style="align-items:center;">
+            <div>
+              <div style="height:220px; overflow:hidden; margin-bottom:10px;">
+                <!-- Forward acceleration: measured accel vs gravity -->
+                <svg viewBox="0 0 600 220" preserveAspectRatio="xMidYMid meet" style="width:100%; height:220px;">
+                  <defs>
+                    <style>
+                      .d{fill:none; stroke:#ddd; stroke-width:3}
+                      .lbl{font:18px 'Noto Sans KR', Arial, sans-serif; fill:#fff; text-anchor:middle}
+                      .v{fill:none; stroke-width:4}
+                      .g{stroke:#58a6ff}
+                      .a{stroke:#ffb86c}
+                      .fwd{stroke:#2dd36f}
+                    </style>
+                    <marker id="ahG2" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                      <polygon points="0 0, 6 2, 0 4" fill="#58a6ff"></polygon>
+                    </marker>
+                    <marker id="ahA2" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                      <polygon points="0 0, 6 2, 0 4" fill="#ffb86c"></polygon>
+                    </marker>
+                    <marker id="ahF" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                      <polygon points="0 0, 6 2, 0 4" fill="#2dd36f"></polygon>
+                    </marker>
+                  </defs>
+                  <!-- simple drone body (side view) -->
+                  <g transform="translate(300,70) scale(1.4)">
+                    <rect class="d" x="-40" y="-10" width="80" height="20"></rect>
+                    <line class="d" x1="-25" y1="-10" x2="-25" y2="-25"></line>
+                    <line class="d" x1="25" y1="-10" x2="25" y2="-25"></line>
+                    <circle class="d" cx="-25" cy="-30" r="6"></circle>
+                    <circle class="d" cx="25" cy="-30" r="6"></circle>
+                  </g>
+                  <!-- forward accel hint -->
+                  <line class="v fwd" x1="300" y1="70" x2="360" y2="70" marker-end="url(#ahF)"></line>
+                  <text class="lbl" x="365" y="65">+a_x (forward)</text>
+                  <!-- gravity vector at body (down) -->
+                  <line class="v g" x1="300" y1="70" x2="300" y2="130" marker-end="url(#ahG2)"></line>
+                  <text class="lbl" x="290" y="135">g</text>
+                  <!-- measured accel (specific force): -a_lin + R^T g (tilted, |a| > g) -->
+                  <line class="v a" x1="300" y1="70" x2="260" y2="120" marker-end="url(#ahA2)"></line>
+                  <text class="lbl" x="245" y="125">|a| > g</text>
+                </svg>
+              </div>
+              <svg viewBox="0 0 600 220" preserveAspectRatio="xMidYMid meet" style="width:100%; height:220px;">
+                <defs>
+                  <style>
+                    .bx{fill:#2a2a2a;stroke:#666;stroke-width:2;rx:10;ry:10}
+                    .tx{font:20px 'Noto Sans KR', Arial, sans-serif; fill:#fff; text-anchor:middle}
+                    .ax{fill:none; stroke:#4ea1f3; stroke-width:4; marker-end:url(#mahAh)}
+                  </style>
+                  <marker id="mahAh" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                    <polygon points="0 0, 6 2, 0 4" fill="#4ea1f3"></polygon>
+                  </marker>
+                </defs>
+                <!-- Inputs -->
+                <rect class="bx" x="40" y="30" width="160" height="50"></rect>
+                <text class="tx" x="120" y="63">ACC (|a|≈g)</text>
+                <rect class="bx" x="40" y="100" width="160" height="50"></rect>
+                <text class="tx" x="120" y="133">GYRO</text>
+                <!-- Mahony -->
+                <rect class="bx" x="260" y="65" width="180" height="60"></rect>
+                <text class="tx" x="350" y="100">Mahony</text>
+                <!-- Output -->
+                <rect class="bx" x="480" y="65" width="100" height="60"></rect>
+                <text class="tx" x="530" y="100">Quaternion</text>
+                <!-- Trust gate (w: EMA of |a|-g) -->
+                <rect class="bx" x="220" y="30" width="30" height="50"></rect>
+                <text class="tx" x="235" y="63">w</text>
+                <!-- Arrows -->
+                <line class="ax" x1="200" y1="55" x2="220" y2="55"></line>
+                <line class="ax" x1="250" y1="55" x2="260" y2="95"></line>
+                <line class="ax" x1="200" y1="125" x2="260" y2="95"></line>
+                <line class="ax" x1="440" y1="95" x2="480" y2="95"></line>
+              </svg>
+            </div>
+            <div>
+              <ul>
+                <li>자이로 적분으로 쿼터니언 갱신 및 정규화 수행 → 수치 안정성 확보</li>
+                <li>|a| ≈ g 구간에서만 가속도 기반 보정 적용, EMA로 신뢰도 가중치 스무딩</li>
+                <li>기울기 오차 기반 PI 보정 (I-term 누적), yaw-rate 안정성 우선 설계</li>
+                <li>저가속·정지 상태에서 자이로 바이어스 온라인 추정</li>
+                <li>모노토닉 타임스탬프 기반 Δt 계산 및 NaN/발산 방지 로직 포함</li>
+              </ul>
+            </div>
+          </div>
+          <aside class="notes">
+            Mahony 비선형 보정의 핵심(신뢰도 가중, 바이어스 추정)을 요약하고, 제어 루프의 초기 안정화에 기여하는 포인트를 강조합니다.
+          </aside>
+        </section>
+
+        <!-- 6. 제어 구조 (Rate PI + D, 필터/안정화) -->
+        <section>
+          <h2>제어 구조 · Attitude P + Rate PI + D</h2>
+          <div style="height:2em;"></div>
+          <div class="two-col" style="align-items:center;">
+            <div>
+              <!-- Simplified PX4-like control pipeline: Sensors -> Estimator -> Controllers -> Mixer -> Actuators -->
+              <svg viewBox="0 0 900 260" preserveAspectRatio="xMidYMid meet" style="width:100%; height:260px;">
+                <defs>
+                  <style>
+                    .bx{fill:#2a2a2a;stroke:#666;stroke-width:2;rx:10;ry:10}
+                    .lbl{font:18px 'Noto Sans KR', Arial, sans-serif; fill:#fff; text-anchor:middle}
+                    .ax{fill:none; stroke:#4ea1f3; stroke-width:4; marker-end:url(#ctlAh)}
+                    .axSec{fill:none; stroke:#a0c4ff; stroke-width:3; stroke-dasharray:6 6; marker-end:url(#ctlAh)}
+                    .axFF{fill:none; stroke:#ffb86c; stroke-width:3; stroke-dasharray:4 6; marker-end:url(#ctlAh)}
+                    .silLbl{font:20px 'Noto Sans KR', Arial, sans-serif; font-weight:700; fill:#c8a200; text-anchor:middle}
+                  </style>
+                  <marker id="ctlAh" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                    <polygon points="0 0, 6 2, 0 4" fill="#4ea1f3"></polygon>
+                  </marker>
+                </defs>
+                <!-- Row of blocks -->
+                <!-- SIL region outline: Estimator ~ Mixer -->
+                <rect x="200" y="25" width="520" height="150" style="fill:none; stroke:#c8a200; stroke-width:2; stroke-dasharray:8 6; rx:12; ry:12;"></rect>
+                <text class="silLbl" x="460" y="18">SIL</text>
+                <rect class="bx" x="30" y="60" width="150" height="60"></rect>
+                <text class="lbl" x="105" y="88">
+                  <tspan x="105" dy="0">Sensors</tspan>
+                  <tspan x="105" dy="18">IMU · MAG · BARO</tspan>
+                </text>
+                <rect class="bx" x="210" y="35" width="150" height="50"></rect>
+                <text class="lbl" x="285" y="62">
+                  <tspan x="285" dy="0">Estimator</tspan>
+                  <tspan x="285" dy="18">(Mahony/EKF)</tspan>
+                </text>
+                <rect class="bx" x="390" y="35" width="150" height="50"></rect>
+                <text class="lbl" x="465" y="62">Attitude P</text>
+                <rect class="bx" x="390" y="115" width="150" height="50"></rect>
+                <text class="lbl" x="465" y="142">Rate PI + D</text>
+                <!-- Gyro preprocessing block for rate feedback -->
+                <rect class="bx" x="210" y="115" width="150" height="50"></rect>
+                <text class="lbl" x="285" y="142">
+                  <tspan x="285" dy="0">Gyro LPF</tspan>
+                  <tspan x="285" dy="18">Bias</tspan>
+                </text>
+                <rect class="bx" x="570" y="60" width="140" height="60"></rect>
+                <text class="lbl" x="640" y="95">Mixer</text>
+                <rect class="bx" x="730" y="60" width="140" height="60"></rect>
+                <text class="lbl" x="800" y="88">
+                  <tspan x="800" dy="0">Actuators</tspan>
+                  <tspan x="800" dy="18">(PWM/ROTOR)</tspan>
+                </text>
+                <!-- Arrows -->
+                <line class="ax" x1="180" y1="90" x2="210" y2="60"></line>
+                <line class="ax" x1="360" y1="60" x2="390" y2="60"></line>
+                <!-- Sensors -> Gyro LPF/Bias (measurement path) -->
+                <line class="ax" x1="180" y1="90" x2="210" y2="140"></line>
+                <!-- Gyro LPF/Bias -> Rate PI + D -->
+                <line class="ax" x1="360" y1="140" x2="390" y2="140"></line>
+                <!-- Attitude P -> Rate PI + D (setpoint flow) -->
+                <line class="ax" x1="465" y1="85" x2="465" y2="115"></line>
+                <!-- Attitude P small feedforward -> Mixer (trim/FF, ±50us) -->
+                <line class="axFF" x1="540" y1="60" x2="570" y2="90"></line>
+                <line class="ax" x1="540" y1="140" x2="570" y2="90"></line>
+                <line class="ax" x1="710" y1="90" x2="730" y2="90"></line>
+              </svg>
+            </div>
+            <div>
+              <ul>
+                <li><b>Attitude P</b>: 소각오차→각속도 참조, 호버 트림(3 s)·각도→출력 80 µs/rad·±50 µs, 램프-인 0.8 s</li>
+                <li><b>Rate‑PI</b>: 조건부 적분, anti‑windup, yaw 축 우선(rate→0)</li>
+                <li><b>D‑term</b>: 자이로율 PT2×2 필터 + 출력 클램프(±12 µs)</li>
+                <li><b>출력 성형</b>: 모터 Slew‑rate 제한(믹서 이전), EST/GT EMA 블렌딩(τ≈0.25 s)</li>
+              </ul>
+              <aside class="notes">
+                외부 P와 내부 Rate 루프의 결합 구조를 한 장에 요약해, 튜닝 순서와 상호작용을 설명하기 좋게 구성했습니다.
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <!-- 7. 구현/실행 절차 -->
+        <section>
+          <h2>구현 · 실행 절차</h2>
+          <ol>
+            <li>AirSim 초기화 및 Δt 일관성 확인</li>
+            <li>SIL 스레드 우선순위 상향, 타이머 1 ms</li>
+            <li>SHM 세그먼트 연결(센서/문자열/카운터 검사)</li>
+            <li>주파수·drop/overwrite 모니터링</li>
+            <li>워밍업 10 s → 로그 기록 → 시나리오 S1–S4 수행</li>
+          </ol>
+          <aside class="notes">
+            운영상의 체크리스트를 강조하고, 허용오차(±5%) 기준으로 루프 주파수 확인을 언급합니다.
+          </aside>
+        </section>
+
+        <!-- 8. 실험 환경/시나리오 -->
+        <section>
+          <h2>실험 환경 · 시나리오</h2>
+          <div class="two-col">
+            <div>
+              <ul>
+                <li>Windows 11, AirSim, in-process SHM</li>
+                <li>IMU 1 kHz, PWM 400 Hz</li>
+                <li>시나리오 S1 Hover, S2 Gyro Bias, S3 Dyn Accel, S4 Agg Tilt</li>
+              </ul>
+            </div>
+            <div>
+              <img src="img/xsim_test.png" alt="주파수 측정 화면" />
+            </div>
+          </div>
+          <aside class="notes">
+            각 시나리오 목적을 한 줄씩: 정상상태/바이어스/가속 외란/공격적 자세로 강건성 평가.
+          </aside>
+        </section>
+
+        <!-- 9. 핵심 결과 요약 -->
+        <section>
+          <h2>핵심 결과</h2>
+          <div class="two-col">
+            <div>
+              <table>
+                <thead>
+                  <tr><th>지표</th><th>S1</th><th>S2</th><th>S3</th><th>S4</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>p2p (µs)</td><td>46</td><td>25</td><td>26</td><td>3</td></tr>
+                  <tr><td>sat (%)</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+                  <tr><td>Att. RMS (deg)</td><td>1.227</td><td>2.040</td><td>1.748</td><td>0.440</td></tr>
+                  <tr><td>Yaw rate (rad/s)</td><td>0.000</td><td>0.000</td><td>0.000</td><td>0.000</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <ul>
+                <li>루프 달성: IMU 1000±5 Hz, BARO 100±1 Hz, PWM 400±2 Hz</li>
+                <li>RPC 대비: SHM 경로가 목표 주파수 유지, 지연/지터 현저히 낮음</li>
+                <li>로그 스냅샷: yaw 정지, est/GT 일치(≈0.0–0.1°)</li>
+              </ul>
+            </div>
+          </div>
+          <aside class="notes">
+            표 수치로 정량 요약, 루프 달성치와 RPC 대비 메시지를 명확히 전달합니다.
+          </aside>
+        </section>
+
+        <!-- 10. 결론/향후과제 -->
+        <section>
+          <h2>결론 · 향후 과제</h2>
+          <ul>
+            <li>공유메모리 기반 고주파 폐루프 + 안정화 패키지로 벤치마크/튜닝 프레임 제공</li>
+            <li>스파이크·포화율 감소, yaw 정지, Attitude RMS 개선</li>
+            <li>FC 구조 반영 → 실기체로 최소 변경 이식 가능</li>
+          </ul>
+          <p class="small"><strong>향후</strong>: 동적 노치 자동화, EKF 비교, 지연/지터 정량화, ROS2/HIL/실기체 포팅, 자동 튜닝/진단</p>
+          <aside class="notes">
+            실무 적용 메시지와 이식성, 그리고 후속 연구 방향을 간결히 정리합니다.
+          </aside>
+        </section>
+
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/reveal.js@5/dist/reveal.js"></script>
+    <script>
+      Reveal.initialize({
+        hash: true,
+        slideNumber: true,
+        controls: true,
+        progress: true,
+        center: true,
+        transition: 'slide',
+        width: 1280,
+        height: 720,
+      });
+    </script>
+  </body>
+  </html>
+
+
