@@ -472,20 +472,7 @@
           </div>
         </section>
 
-        <!-- 7. 구현/실행 절차 -->
-        <section>
-          <h2>구현 · 실행 절차</h2>
-          <ol>
-            <li>AirSim 초기화 및 Δt 일관성 확인</li>
-            <li>SIL 스레드 우선순위 상향, 타이머 1 ms</li>
-            <li>SHM 세그먼트 연결(센서/문자열/카운터 검사)</li>
-            <li>주파수·drop/overwrite 모니터링</li>
-            <li>워밍업 10 s → 로그 기록 → 시나리오 S1–S4 수행</li>
-          </ol>
-          <aside class="notes">
-            운영상의 체크리스트를 강조하고, 허용오차(±5%) 기준으로 루프 주파수 확인을 언급합니다.
-          </aside>
-        </section>
+        
 
         <!-- 8. 실험 환경/시나리오 -->
         <section>
@@ -517,19 +504,29 @@
                   <tr><th>지표</th><th>S1</th><th>S2</th><th>S3</th><th>S4</th></tr>
                 </thead>
                 <tbody>
-                  <tr><td>p2p (µs)</td><td>46</td><td>25</td><td>26</td><td>3</td></tr>
+                  <tr><td>PWM p2p (µs)</td><td>46</td><td>25</td><td>26</td><td>3</td></tr>
                   <tr><td>sat (%)</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
                   <tr><td>Att. RMS (deg)</td><td>1.227</td><td>2.040</td><td>1.748</td><td>0.440</td></tr>
-                  <tr><td>Yaw rate (rad/s)</td><td>0.000</td><td>0.000</td><td>0.000</td><td>0.000</td></tr>
                 </tbody>
               </table>
             </div>
             <div>
-              <ul>
-                <li>루프 달성: IMU 1000±5 Hz, BARO 100±1 Hz, PWM 400±2 Hz</li>
-                <li>RPC 대비: SHM 경로가 목표 주파수 유지, 지연/지터 현저히 낮음</li>
-                <li>로그 스냅샷: yaw 정지, est/GT 일치(≈0.0–0.1°)</li>
-              </ul>
+              <table style="width:100%; border-collapse:collapse;">
+                <thead>
+                  <tr style="border-bottom:1px solid #555;">
+                    <th style="text-align:left; padding:4px 6px;">항목</th>
+                    <th style="text-align:right; padding:4px 6px;">SHM (측정)</th>
+                    <th style="text-align:right; padding:4px 6px;">RPC (측정)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td style="padding:4px 6px;">IMU 입력 (Hz)</td><td style="text-align:right; padding:4px 6px;">≈ 78,383</td><td style="text-align:right; padding:4px 6px;">≈ 15,516</td></tr>
+                  <tr><td style="padding:4px 6px;">Barometer 입력 (Hz)</td><td style="text-align:right; padding:4px 6px;">100</td><td style="text-align:right; padding:4px 6px;">100</td></tr>
+                  <tr><td style="padding:4px 6px;">Magnetometer 입력 (Hz)</td><td style="text-align:right; padding:4px 6px;">100</td><td style="text-align:right; padding:4px 6px;">100</td></tr>
+                  <tr><td style="padding:4px 6px;">PWM 출력 (Hz)</td><td style="text-align:right; padding:4px 6px;">400</td><td style="text-align:right; padding:4px 6px;">340</td></tr>
+                </tbody>
+              </table>
+              <div class="small" style="opacity:0.8; margin-top:6px;">조건: CAP=1, 동일 PC/월드, 60–120 s 윈도우 평균</div>
             </div>
           </div>
           <aside class="notes">
@@ -540,14 +537,95 @@
         <!-- 10. 결론/향후과제 -->
         <section>
           <h2>결론 · 향후 과제</h2>
-          <ul>
-            <li>공유메모리 기반 고주파 폐루프 + 안정화 패키지로 벤치마크/튜닝 프레임 제공</li>
-            <li>스파이크·포화율 감소, yaw 정지, Attitude RMS 개선</li>
-            <li>FC 구조 반영 → 실기체로 최소 변경 이식 가능</li>
-          </ul>
-          <p class="small"><strong>향후</strong>: 동적 노치 자동화, EKF 비교, 지연/지터 정량화, ROS2/HIL/실기체 포팅, 자동 튜닝/진단</p>
+          <div>
+            <ul>
+              <li>공유메모리 기반 고주파 폐루프 + 안정화 패키지로 벤치마크/튜닝 프레임 제공</li>
+              <li>스파이크·포화율 감소, yaw 정지, Attitude RMS 개선</li>
+              <li>FC 구조 반영 → 실기체로 최소 변경 이식 가능</li>
+            </ul>
+      
+          </div>
+          <div style="height:12px;"></div>
+          <div>
+              <!-- Dual pipelines with shared Filters/Mixer: SIL (top) and FC(H/W) (bottom) -->
+              <svg viewBox="0 0 900 260" preserveAspectRatio="xMidYMid meet" style="width:100%; height:260px;">
+                <defs>
+                  <style>
+                    .lbl{font:18px 'Noto Sans KR', Arial, sans-serif; fill:#fff; text-anchor:middle}
+                    .bx{fill:#2a2a2a; stroke:#666; stroke-width:2; rx:10; ry:10}
+                    .opt{fill:#333; stroke:#777; stroke-width:2; rx:8; ry:8}
+                    .dashSW{fill:none; stroke:#88c0ff; stroke-width:2; stroke-dasharray:8 6; rx:12; ry:12}
+                    .dashHW{fill:none; stroke:#a3be8c; stroke-width:2; stroke-dasharray:8 6; rx:12; ry:12}
+                    .a{fill:none; stroke:#4ea1f3; stroke-width:4; marker-end:url(#arr)}
+                    .alt{fill:#2a2a2a; stroke:#b26bb2; stroke-width:2; rx:8; ry:8}
+                    .aAlt{fill:none; stroke:#ff7ad9; stroke-width:3; stroke-dasharray:6 6; marker-end:url(#arrAlt)}
+                  </style>
+                  <marker id="arr" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                    <polygon points="0 0, 6 2, 0 4" fill="#4ea1f3"></polygon>
+                  </marker>
+                  <marker id="arrAlt" markerUnits="strokeWidth" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+                    <polygon points="0 0, 6 2, 0 4" fill="#ff7ad9"></polygon>
+                  </marker>
+                </defs>
+                <!-- Group boxes (cover all nodes) -->
+                <rect class="dashSW" x="5" y="10" width="880" height="100"></rect>
+                <text class="lbl" x="45" y="18">S/W</text>
+                <rect class="dashHW" x="5" y="120" width="880" height="120"></rect>
+                <text class="lbl" x="45" y="128">H/W</text>
+                <!-- Top row: SIL -> Sensors -> Estimator -> Controller -> Mixer -> AirSim (uniform widths) -->
+                <rect class="bx" x="10" y="28" width="120" height="44"></rect>
+                <text class="lbl" x="70" y="50">SIL</text>
+                <rect class="bx" x="150" y="28" width="120" height="44"></rect>
+                <text class="lbl" x="210" y="50">Sensors</text>
+                <rect class="bx" x="290" y="28" width="120" height="44"></rect>
+                <text class="lbl" x="350" y="50">Estimator</text>
+                <rect class="bx" x="430" y="28" width="120" height="44"></rect>
+                <text class="lbl" x="490" y="50">Controller</text>
+                <rect class="bx" x="570" y="28" width="120" height="44"></rect>
+                <text class="lbl" x="630" y="50">Mixer</text>
+                <rect class="bx" x="710" y="28" width="120" height="44"></rect>
+                <text class="lbl" x="770" y="50">AirSim</text>
+                <!-- Top arrows (edge-to-edge) -->
+                <line class="a" x1="130" y1="50" x2="150" y2="50"></line>
+                <line class="a" x1="270" y1="50" x2="290" y2="50"></line>
+                <line class="a" x1="410" y1="50" x2="430" y2="50"></line>
+                <line class="a" x1="550" y1="50" x2="570" y2="50"></line>
+                <line class="a" x1="690" y1="50" x2="710" y2="50"></line>
+                <!-- Options under Estimator (no arrows) -->
+                <rect class="opt" x="290" y="84" width="120" height="26"></rect>
+                <text class="lbl" x="350" y="103">Mahony</text>
+                <rect class="opt" x="290" y="114" width="120" height="26"></rect>
+                <text class="lbl" x="350" y="133">EKF</text>
+                <rect class="opt" x="290" y="144" width="120" height="26"></rect>
+                <text class="lbl" x="350" y="163">ML</text>
+                <!-- Options under Controller (no arrows) -->
+                <rect class="opt" x="430" y="84" width="120" height="26"></rect>
+                <text class="lbl" x="490" y="103">PI + D</text>
+                <rect class="opt" x="430" y="114" width="120" height="26"></rect>
+                <text class="lbl" x="490" y="133">PID + FF</text>
+                <rect class="opt" x="430" y="144" width="120" height="26"></rect>
+                <text class="lbl" x="490" y="163">MPC</text>
+                <!-- Bottom row: FC(H/W) -> Sensors -> shared Estimator/Controller/Mixer -> ESCs -->
+                <rect class="bx" x="10" y="138" width="120" height="44"></rect>
+                <text class="lbl" x="70" y="160">FC (H/W)</text>
+                <rect class="bx" x="150" y="138" width="120" height="44"></rect>
+                <text class="lbl" x="210" y="160">Sensors</text>
+                <rect class="bx" x="710" y="138" width="120" height="44"></rect>
+                <text class="lbl" x="770" y="160">ESCs</text>
+                <!-- Bottom arrows (avoid overlaps) -->
+                <line class="a" x1="130" y1="160" x2="150" y2="160"></line>
+                <line class="a" x1="270" y1="160" x2="290" y2="50"></line>
+                <line class="a" x1="690" y1="50" x2="710" y2="160"></line>
+                <!-- H/W alternative: End-to-End AI policy path -->
+                <rect class="alt" x="430" y="188" width="120" height="40"></rect>
+                <text class="lbl" x="490" y="208">E2E Policy</text>
+                <line class="aAlt" x1="270" y1="160" x2="430" y2="208"></line>
+                <line class="aAlt" x1="550" y1="208" x2="710" y2="160"></line>
+              </svg>
+            </div>
+          </div>
           <aside class="notes">
-            실무 적용 메시지와 이식성, 그리고 후속 연구 방향을 간결히 정리합니다.
+            오른쪽 그림은 필터/추정기 클래스 교체(소프트웨어/하드웨어 포함)가 용이한 구조임을 나타냅니다.
           </aside>
         </section>
 
