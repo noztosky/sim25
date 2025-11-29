@@ -136,6 +136,26 @@ AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}
 \date{}
 
 \begin{document}
+% ====== Cover Page ======
+\begin{titlepage}
+\onecolumn
+\noindent{\fontsize{10}{12}\selectfont 사이버 물리 시스템 보안 특론}\par
+\vspace*{0.28\textheight}
+\centering
+{\fontsize{18}{26}\selectfont AirSim 연동 고주파 제어 벤치마크 · 안정화 툴킷\par}
+\vfill
+{\fontsize{12}{18}\selectfont
+\begin{flushright}
+\begin{tabular}{rl}
+\textbf{학과}: & 정보통신미디어공학과 \\
+\textbf{학번}: & 24612028 \\
+\textbf{이름}: & 이남훈 \\
+\end{tabular}
+\end{flushright}\par}
+\vspace*{10mm}
+\end{titlepage}
+% ====== End Cover Page ======
+
 % JASE-style title/abstract block spanning both columns
 \twocolumn[
 \vspace*{-4mm}
@@ -149,7 +169,7 @@ AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}
 \TitleTopLineBox\par\vspace{2pt}
 {\fontsize{14.4}{14.4}\selectfont \bfseries AirSim 연동 고주파 제어 벤치마크·안정화 툴킷}\par
 \TitleSubLineBox\par\vspace{2pt}
-\AuthorLine{김경목\textsuperscript{1\textdagger}· 이남훈\textsuperscript{2}· 김성권\textsuperscript{3}}\par
+\AuthorLine{ooo\textsuperscript{1\textdagger}· ooo\textsuperscript{2}· ooo\textsuperscript{3}}\par
 {\fontsize{10}{12}\selectfont \textsuperscript{1}\, 서울과학기술대학교}\par
 {\fontsize{10}{12}\selectfont \textsuperscript{2}\, 서울과학기술대학교}\par
 {\fontsize{10}{12}\selectfont \textsuperscript{3}\, 서울과학기술대학교}\par\vspace{4pt}
@@ -172,13 +192,13 @@ AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}
 ]
 
 \section{서\hspace{2.0em}론}
-\ \ 소형 멀티로터의 자세 제어는 모터 및 기체의 비대칭, 센서 바이어스, 추정기 게인 전환(gain switching) 등으로 인해 출력 스파이크와 장기적인 yaw 드리프트가 빈번하게 발생한다. 본 연구에서는 AirSim과 Software-in-the-Loop (SIL) 제어기를 프로세스 내 공유 메모리 파이프라인으로 직접 연결하여, 타임스탬프 기반의 관성측정장치(Inertial Measurement Unit, IMU) \SI{1000}{Hz}, 기압(Barometer) \SI{100}{Hz}, 자기(Magnetometer) \SI{100}{Hz}, GNSS \SI{10}{Hz} 센서 데이터를 실시간으로 교환하는 고속 센싱–제어 루프를 구현하였다.
+\ \ 소형 멀티로터의 자세 제어는 모터 및 기체의 비대칭, 센서 바이어스, 추정기 게인 전환(gain switching) 등으로 인해 출력 스파이크와 장기적인 yaw 드리프트가 빈번하게 발생한다. 본 연구에서는 AirSim과 Software-in-the-Loop (SIL) 제어기를 프로세스 내 공유 메모리 파이프라인으로 직접 연결하여, 타임스탬프 기반의 관성측정장치(Inertial Measurement Unit, IMU) 1000 Hz, 기압(Barometer) 100 Hz, 자기(Magnetometer) 100 Hz, GNSS 10 Hz 센서 데이터를 실시간으로 교환하는 고속 센싱–제어 루프를 구현하였다.
 
 \AuthorInfoBottomLeft
 
-\noindent 구체적으로, 본 시스템은 GNSS(위치) \SI{10}{Hz}의 센서 스트림을 소비하고, ESC/로터에 전달되는 PWM(로터 구동 명령) \SI{400}{Hz}를 생성하는 고속 센싱–제어 폐루프를 제안하였다. 제안된 루프는 SIL 제어기에 자세 비례(P)와 각속도(회전 속도) 비례–적분–미분(PI+D) 제어기를 배치하고, yaw 축에 anti-windup 기능이 포함된 각속도 PI 제어기, 자이로 D-term PT2$\times$2 필터 및 출력 클램프, 호버 트림 추정 후 램프-인(ramp-in), Mahony 필터\cite{mahony} 기반 가속도 신뢰도 게인 스무딩, EST/GT 연속 블렌딩, 모터 Slew rate 제한 등을 결합하였다. 
+\noindent (위치) 10 Hz의 센서 스트림을 소비하고, ESC/로터에 전달되는 PWM(로터 구동 명령) 400 Hz를 생성하는 고속 센싱–제어 폐루프를 제안하였다. 제안된 루프는 SIL 제어기에 자세 비례(P)와 각속도(회전 속도) 비례–적분–미분(PI+D) 제어기를 배치하고, yaw 축에 anti-windup 기능이 포함된 각속도 PI 제어기, 자이로 D-term PT2×2 필터 및 출력 클램프, 호버 트림 추정 후 램프-인(ramp-in), Mahony 필터 기반 가속도 신뢰도 게인 스무딩, EST/GT 연속 블렌딩, 모터 Slew rate 제한 등을 결합하였다. 
 RPC 기반 통합 대비 제안된 파이프라인은 지연(latency)과 지터(jitter)를 낮추면서 목표 주파수를 안정적으로 유지하며, 모터 및 자이로 바이어스나 동적 가속 조건에서 peak-to-peak(p-p) 진폭과 포화율을 감소시키고, yaw 정지(각속도→0)와 자세 root-mean-square (RMS) 오차를 개선하였다. 또한 SIL 제어기가 실제 비행제어기(Flight Controller, FC)의 구조를 반영하므로, 시뮬레이터에서 검증한 알고리즘을 최소한의 코드 변경으로 실기체에 이식할 수 있다. 
-AirSim이나 Gazebo 환경에서 PID 제어기, 필터, 튜닝 기법에 대한 연구는 다수 보고되었으나, AirSim–공유메모리–SIL 제어기로 구성된 고속 센싱–제어 루프(IMU \SI{1000}{Hz}, Barometer/Magnetometer \SI{100}{Hz}, GNSS \SI{10}{Hz}, PWM \SI{400}{Hz})를 일관 유지하며, RPC와의 정량적 비교(지연·지터, p-p, 포화율, yaw-rate, RMS)를 제시한 공개 연구는 제한적이었다 [12]. 
+AirSim이나 Gazebo 환경에서 PID 제어기, 필터, 튜닝 기법에 대한 연구는 다수 보고되었으나, AirSim–공유메모리–SIL 제어기로 구성된 고속 센싱–제어 루프(IMU 1000 Hz, Barometer/Magnetometer 100 Hz, GNSS 10 Hz, PWM 400 Hz)를 일관 유지하며, RPC와의 정량적 비교(지연·지터, p-p, 포화율, yaw-rate, RMS)를 제시한 공개 연구는 제한적이었다 [12]. 
 또한 제안된 공유메모리 기반 분리 구조는 SIL 기능을 비행제어기(FC) 개발과 모듈 경계로 분리하여 시뮬레이터와 독립적인 빌드·실행을 가능하게 하였으며, 이로써 컴파일 시간과 배포 복잡도를 줄이고 반복 개발 속도를 향상시켰다.
 
 % 관련 연구(섹션 2)에서만 서브섹션 제목-본문 간격을 0으로 축소
@@ -194,7 +214,7 @@ ArduPilot과 PX4는 외부 자세 제어 루프(P)와 내부 각속도 제어 �
 미분항은 고주파 노이즈와 기체의 고유 진동 모드에 특히 민감하므로, D-term 전용 저역통과(PT1/PT2), 정적/동적 노치(dyn-notch; 모터 RPM/고조파 추적), 그리고 차분기 성형(differentiator shaping; lead–lag/biquad 기반)을 조합해 고주파 성분을 억제한다. 실무에서는 (i) 자이로 전역 필터와 분리된 D-term 전용 필터 체인을 구성하고, (ii) 스파이크 억제를 위해 D-클램프(D 출력 한계/소프트 리미트)를 병행하며, (iii) 모터 Slew rate 제한으로 단발 스파이크와 포화 점유율을 줄인다. 또한 D-term은 일반적으로 측정값(각속도) 기반 미분으로 구현되므로, 필터 차수·차단주파수 선택 시 위상 지연과 이득 여유를 함께 고려해야 한다 [5], [6].
 
 \subsection{소스 전환(EST/GT)과 연속 블렌딩}
-센서 또는 추정 소스의 전환(예: 추정값(EST)$\leftrightarrow$참값(GT), 센서 페일오버)은 단계적인 전이(step change)가 발생할 경우 제어 루프에 큰 버스트를 유발할 수 있다. 이를 방지하기 위해 일정 시간 동안 가중치를 0에서 1로 선형 증가시키는 연속 블렌딩(continuous weighting)을 적용하여 전환을 부드럽게 만드는 기법이 센서퓨전 및 로버스트 필터링 분야에서 제안되어 왔다 [9].
+센서 또는 추정 소스의 전환(예: EST$\leftrightarrow$GT, 센서 페일오버)은 단계적인 전이(step change)가 발생할 경우 제어 루프에 큰 버스트를 유발할 수 있다. 이를 방지하기 위해 일정 시간 동안 가중치를 0에서 1로 선형 증가시키는 연속 블렌딩(continuous weighting)을 적용하여 전환을 부드럽게 만드는 기법이 센서퓨전 및 로버스트 필터링 분야에서 제안되어 왔다 [9].
 
 \subsection{액추에이터 제약: 포화·출력 변화율 제한과 Slew}
 액추에이터의 포화(saturation)와 출력 변화율 제한(rate limit)은 anti-windup 설계의 핵심 전제 조건이며, 실제 시스템에서는 출력 Slew(명령 변화율 제한)를 통해 전기적·기계적 과도 응답을 억제하고, 구동부 보호 및 제어 명령의 연속성을 확보한다. 멀티로터 제어기에서도 모터별(per-motor) Slew rate 제한 설정이 일반적으로 적용된다 [10], [11].
@@ -247,7 +267,7 @@ ArduPilot과 PX4는 외부 자세 제어 루프(P)와 내부 각속도 제어 �
 
 \end{tikzpicture}%
 }
-\caption{AirSim–공유 메모리–SIL 블록 다이어그램 (AirSim–Shared Memory–SIL block diagram).}\label{fig:airsim_sil}
+\caption{AirSim–Shared Memory–SIL block diagram.}\label{fig:airsim_sil}
 \end{figure}
 
 \subsection{AirSim 센서(IMU, BARO, MAG)}
@@ -280,13 +300,13 @@ BARO는 고도 추정기로, MAG는 Yaw/Heading 보정기로 각각 전달된다
 내부 Rate PI 제어기는 조건부 적분과 적분항 제한(I-limit, anti-windup)을 적용한다. 
 여기서 I항은 적분항(Integral, I-term)을 의미한다. 
 D-term은 자이로율을 2단 PT2 필터로 처리한 후, 출력 값을 $\pm\SI{12}{\micro\second}$ 범위로 클램프한다. 
-Yaw 축은 절대 방위(Heading) 제어 대신 angle-P를 0으로 두고, rate-PI(및 소량의 D-term)을 적용하여 각속도 $0\,\si{rad/s}$로의 수렴(Rate Damping)을 우선한다.
+Yaw 축은 angle-P를 0으로 두고, rate-PI(및 소량의 D-term)을 적용하여 각속도 $0\,\si{rad/s}$로의 수렴을 우선한다.
 
 \subsection{Controller (400 Hz)}
-이륙 초기 과도 응답을 배제하고 호버링 평형점(Trim)을 학습하기 위해 \SI{3}{s} 동안의 평균 $(e_x, e_y)$를 계산하여 이를 
+이륙 후 \SI{3}{s} 동안의 평균 $(e_x, e_y)$를 계산하여 이를 
 \SI{80}{\micro\second\per rad}의 변환 비율로 각도-출력 비례값으로 변환한다. 
 그 결과를 $\pm\SI{50}{\micro\second}$ 범위에서 포화시킨 후, 
-제어권 전환 충격을 줄이기 위해 \SI{0.8}{s} 동안 선형 램프-인(Soft Start) 방식으로 목표값을 적용한다(믹서 이전).  
+\SI{0.8}{s} 동안 선형 램프-인 방식으로 목표값을 적용한다(믹서 이전).  
 또한, 이산 스위치 대신 1차 EMA($\tau\!\approx\!\SI{0.25}{s}$)를 이용해 
 가중치 $w$를 갱신하고, 
 $e=(1-w)e_{\mathrm{est}}+w e_{\mathrm{gt}}$ 형태로 추정값과 실제값을 블렌딩함으로써 
@@ -506,11 +526,12 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]=
 \toprule
 지표 & S1 Hover & S2 Gyro Bias & S3 Dyn Accel & S4 Agg Tilt \\
 \midrule
- p-p(\(\mu s\)) & 46 & 25 & 26 & 3 \\
+ p2p(\(\mu s\)) & 46 & 25 & 26 & 3 \\
  sat(\%) & 0 & 0 & 0 & 0 \\
  RMS(deg) & 1.227 & 2.040 & 1.748 & 0.440 \\
  P95(deg) & 0.724 & 0.636 & 1.515 & 0.734 \\
  yawR(rad/s) & 0.000 & 0.000 & 0.000 & 0.000 \\
+ lat/jit(ms) & -- & -- & -- & -- \\
 \bottomrule
 \end{tabular}%
 }
@@ -526,12 +547,12 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]=
   \item \textbf{산출 방식}: 인접 샘플 간 \(\Delta t\) 역수로 순간 주파수 계산 후, 윈도우 평균(Hz)과 지연/지터 통계(P50/P95) 보고
   \item \textbf{환경 고정}: 동일 PC/월드/\(\Delta t\), 스레드 우선순위 상향, Windows 타이머 분해능 1 ms, 패킷 크기 고정(Nagle 옵션 명시)
 \end{itemize}
-RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스택 오버헤드로 인해 목표 루프 주파수에 안정적으로 도달하기 어려웠고, 공유메모리(SPSC, zero-copy)를 사용하는 \emph{SIL 제어기}는 고주파(IMU \(\sim\!\SI{1}{kHz}\), Barometer \(\sim\!\SI{100}{Hz}\), PWM \(\SI{400}{Hz}\))에서도 안정적으로 동작하였다.
+RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스택 오버헤드로 인해 목표 루프 주파수에 안정적으로 도달하기 어려웠고, 공유메모리(SPSC, zero-copy)를 사용하는 \emph{SIL 제어기}는 고주파(IMU \(\sim\!100\,kHz\), Barometer \(\sim\!100\,Hz\), PWM \(400\,Hz\))에서도 안정적으로 동작하였다.
 
 
 요약하면, RPC 경로는 직렬화·컨텍스트 스위칭·네트워킹 오버헤드로 인해 목표 주파수 달성이 어려운 반면, 공유메모리 경로는 목표 주파수를 일관되게 유지하였다. 이 결과는 제어기/필터 블록을 \emph{SIL 제어기}에서 검증 후 실제 FC에 소스 수준으로 신속 이식할 수 있음을 뒷받침한다.
 
-\subsubsection{통신 경로 비교 요약 및 로그(SIL Controller)}
+\subsubsection{통신 경로 비교 요약 및 로그(External Virtual FC)}
 아래 표는 RPC와 Shared Memory 경로의 측정 주파수를 요약하며(표~\ref{tab:rpc_shm_rates}), 이어지는 로그는 SHM 기반 루프의 발췌 예시이다. 워밍업 \SI{10}{s}를 제외한 동일 분석 윈도우에서 수집하였다.
 
 \begin{lstlisting}[caption={실제 로그 발췌(hover\_bias, 10 Hz 요약)},label=lst:rate_log,breakindent=0pt,breakautoindent=false]
@@ -548,7 +569,7 @@ hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1598 1602 1601 est[r p y]=
 \toprule
 항목 & RPC (Hz) & SHM (Hz) \\
 \midrule
-IMU & 14586 & 1000 \\
+IMU & 14586 & 98600 \\
 Barometer & 100.000 & 100.000 \\
 Magnetometer & 100.000 & 100.000 \\
 PWM & 340.0 & 400.0 \\
@@ -574,21 +595,21 @@ PWM & 340.0 & 400.0 \\
   \item \textbf{이식성}: 구성 요소를 FC 구조에 맞춰 모듈화하여, 시뮬레이터에서 검증한 동일 구조를 실제 FC로 최소 변경 이식 가능.
 \end{itemize}
 
-향후 과제로는 (i) 동적 노치 자동화와 추가 필터 체인 최적화, (ii) magnetometer/altitude (BARO) 통합 및 EKF 대체 비교, (iii) 다양한 부하/스케줄링 조건에서의 지연/지터 정량화, (iv) ROS2·HIL·실기체 포팅을 통한 실기체 검증, (v) 자동 튜닝/안정성 진단 도구화가 있다.
+향후 과제로는 (i) 동적 노치 자동화와 추가 필터 체인 최적화, (ii) magnetometer/altitude (BARO) 통합 및 EKF 대체 비교, (iii) 다양한 부하/스케줄링 조건에서의 지연/지터 정량화, (iv) ROS2·HIL·실기체 포팅을 통한 외삽 검증, (v) 자동 튜닝/안정성 진단 도구화가 있다.
 
 \begin{thebibliography}{12}
-\bibitem{ardutune} ArduPilot Dev Team, "Copter PID Tuning and Rate Controller (ATC\_RAT\_), Filter/Notch Docs," [Online]. Available: \url{https://ardupilot.org/copter/docs/tuning.html} [Accessed: 2025-11-29].
-\bibitem{px4tune} PX4 Dev Team, "Multicopter PID Tuning Guide," [Online]. Available: \url{https://docs.px4.io/main/en/config_mc/pid_tuning_guide_multicopter.html} [Accessed: 2025-11-29].
-\bibitem{astrom} K. J. \AA str\"{o}m and T. H\"{a}gglund, \emph{Advanced PID Control}, ISA, 2006.
-\bibitem{zaccarian} L. Zaccarian and A. R. Teel, \emph{Modern Anti-windup Synthesis}, Princeton University Press, 2011.
-\bibitem{ardunotch} ArduPilot Dev Team, "IMU Notch / Dynamic Notch Filtering," [Online]. Available: \url{https://ardupilot.org/copter/docs/common-imu-notch-filtering.html} [Accessed: 2025-11-29].
-\bibitem{ardufilter} ArduPilot Dev Team, "IMU Filtering Reference (INS\_GYRO\_FILTER, PID D-term filtering)," [Online]. Available: \url{https://ardupilot.org/copter/docs/common-imu-filtering.html} [Accessed: 2025-11-29].
-\bibitem{mahony} R. Mahony, T. Hamel, and J.-M. Pflimlin, "Nonlinear Complementary Filters on the Special Orthogonal Group," \emph{IEEE Transactions on Automatic Control}, vol. 53, no. 5, pp. 1203--1218, 2008.
-\bibitem{madgwick} S. O. H. Madgwick, "An Efficient Orientation Filter for Inertial and Inertial/Magnetic Sensor Arrays," Report x-io and University of Bristol (UK), 2010.
-\bibitem{barshalom} Y. Bar-Shalom, X.-R. Li, and T. Kirubarajan, \emph{Estimation with Applications to Tracking and Navigation}, Wiley, 2001.
-\bibitem{arduslew} ArduPilot Dev Team, "MOT\_SLEWRATE: Motor Output Slew Rate," [Online]. Available: \url{https://ardupilot.org/copter/docs/parameters.html#mot-slewrate-motor-output-slew-rate} [Accessed: 2025-11-29].
-\bibitem{px4act} PX4 Dev Team, "Actuators / Output Configuration (output limiting, mixers)," [Online]. Available: \url{https://docs.px4.io/main/en/config/actuators.html} [Accessed: 2025-11-29].
-\bibitem{airsim} S. Shah et al., "AirSim: High-fidelity visual and physical simulation for autonomous vehicles," in \emph{Field and Service Robotics}, 2017.
+\bibitem{ardutune} ArduPilot, "Copter PID Tuning and Rate Controller (ATC\_RAT\_), Filter/Notch Docs," 2025. \url{https://ardupilot.org/copter/docs/tuning.html}
+\bibitem{px4tune} PX4 Dev Team, "Multicopter PID Tuning Guide," 2025. \url{https://docs.px4.io/main/en/config_mc/pid_tuning_guide_multicopter.html}
+\bibitem{astrom} K. J. \AA str\"{o}m and T. H\"{a}gglund, Advanced PID Control, ISA, 2006.
+\bibitem{zaccarian} L. Zaccarian and A. R. Teel, Modern Anti-windup Synthesis, Princeton, 2011.
+\bibitem{ardunotch} ArduPilot, "IMU Notch / Dynamic Notch Filtering," 2025. \url{https://ardupilot.org/copter/docs/common-imu-notch-filtering.html}
+\bibitem{ardufilter} ArduPilot, "IMU Filtering Reference (INS\_GYRO\_FILTER, PID D-term filtering)," 2025. \url{https://ardupilot.org/copter/docs/common-imu-filtering.html}
+\bibitem{mahony} R. Mahony, T. Hamel, and J.-M. Pflimlin, "Nonlinear Complementary Filters on the Special Orthogonal Group," IEEE TAC, 2008.
+\bibitem{madgwick} S. O. H. Madgwick, "An Efficient Orientation Filter for Inertial and Inertial/Magnetic Sensor Arrays," 2010.
+\bibitem{barshalom} Y. Bar-Shalom, X.-R. Li, and T. Kirubarajan, Estimation with Applications to Tracking and Navigation, Wiley, 2001.
+\bibitem{arduslew} ArduPilot, "MOT\_SLEWRATE: Motor Output Slew Rate," 2025. \url{https://ardupilot.org/copter/docs/parameters.html#mot-slewrate-motor-output-slew-rate}
+\bibitem{px4act} PX4 Dev Team, "Actuators / Output Configuration (output limiting, mixers)," 2025. \url{https://docs.px4.io/main/en/config/actuators.html}
+\bibitem{airsim} S. Shah et al., "AirSim: High-fidelity visual and physical simulation for autonomous vehicles," arXiv:1705.05065, 2017.
 \end{thebibliography}
 
 \end{document}
