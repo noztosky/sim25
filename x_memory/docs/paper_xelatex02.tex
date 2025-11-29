@@ -65,6 +65,8 @@
 % 문단 간격/들여쓰기 조정 (촘촘한 본문)
 \setlength{\parskip}{0.25ex plus 0.1ex minus 0.1ex}
 \setlength{\parindent}{1.4em}
+% 섹션 번호 깊이: \section(1), \subsection(2)까지만 번호, \subsubsection(3)은 번호 생략
+\setcounter{secnumdepth}{2}
 
 % 특수 하이픈(비분리 하이픈 U+2011 등)을 일반 하이픈으로 치환
 % Map non-breaking hyphen(U+2011) and en dash(U+2013).
@@ -166,7 +168,7 @@ AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}
 {\fontsize{10}{12}\selectfont\ \ We present a high-rate simulation–control loop that connects AirSim to an external Software-in-the-Loop (SIL) controller through an in-process shared-memory pipeline. AirSim publishes timestamped high-rate sensor streams (kHz-class inertial, 100-Hz-class environmental, and GNSS) to a lock-free ring buffer; the SIL controller consumes the streams, executes an attitude Proportional (P) and rate Proportional–Integral (PI) plus filtered Derivative (D) controller (PID structure), and returns 400-Hz PWM signals through the same path. Compared with Remote Procedure Call (RPC)-based integration, the proposed pipeline sustains target update rates while significantly reducing latency and jitter. Under injected motor/gyro biases and dynamic accelerations, the loop reduces peak-to-peak (p-p) spikes and saturation occupancy, achieves yaw stop (rate→0), and improves attitude root-mean-square (RMS) error. Because the SIL controller mirrors the onboard flight controller (FC) structure, algorithms validated in AirSim can be transferred with minimal code modification. The proposed framework provides a practical recipe and reference implementation for simulator and Hardware-in-the-Loop (HIL) development, where high-frequency sensing and actuation are essential.\par}\vspace{4pt}
 {\centering{\fontsize{10}{12}\selectfont\bfseries 초\hspace{2em}록}\par}
 \vspace{12pt}
-{\fontsize{10}{12}\selectfont\ \ 본 논문은 AirSim과 Software-in-the-Loop (SIL) 제어기를 프로세스 내 공유 메모리 파이프라인으로 직결한 고속 센싱–제어 폐루프를 제시한다. AirSim은 타임스탬프 기반의 고속 관성(kHz급)·환경(100 Hz급)·GNSS 센서 데이터를 락프리 링버퍼로 송출하고, SIL 제어기는 이를 소비하여 자세 비례(Proportional, P) 및 각속도 비례–적분(PI)과 필터드 미분(Derivative, D) 제어(PID 구조)를 수행한 뒤, 동일 공유 메모리 채널을 통해 400 Hz PWM 신호를 AirSim으로 반환한다. Remote Procedure Call (RPC) 방식 대비 지연(latency)과 지터(jitter)가 감소하며 목표 주파수를 안정적으로 유지한다. 모터 및 자이로 바이어스, 동적 가속 환경에서 피크-투-피크(p-p) 진폭과 포화율이 감소하고, yaw 정지(각속도→0) 및 자세 RMS 오차가 개선되며, 구조가 실기체 비행제어기(Flight Controller, FC)와 동일하므로 최소한의 코드 변경으로 이식이 가능하다. 제안된 프레임워크는 고주파 센싱과 구동이 필수적인 시뮬레이터 및 HIL 개발 환경에서 실용적인 기준과 참조 구현을 제공한다.\par}\vspace{12pt}
+{\fontsize{10}{12}\selectfont\ \ 본 논문은 AirSim과 SIL 제어기를 공유 메모리로 직결한 고속 센싱–제어 폐루프를 제안한다. AirSim은 고속 센서 데이터를 락프리 링버퍼로 송출하고, SIL 제어기는 이를 소비하여 PID 제어를 수행한 후 400Hz PWM 신호를 반환한다. 이 방식은 RPC 대비 지연과 지터를 줄여 목표 주파수를 안정적으로 유지한다. 실험 결과, 외란 환경에서도 출력 진동과 포화율이 감소하고 자세 제어 성능이 향상됨을 확인하였다. 특히 제어기가 실기체 FC와 동일한 구조를 가져 코드 이식이 용이하며, 고주파 센싱과 구동이 필요한 시뮬레이터 및 HIL 개발에 실용적인 참조 모델을 제공한다.\par}\vspace{12pt}
 \noindent\textbf{Key Words:} AirSim, shared-memory pipeline, Software-in-the-Loop (SIL) controller, high-rate sensing, attitude control, latency/jitter reduction
 \vspace{4mm}
 ]
@@ -184,10 +186,10 @@ AirSim이나 Gazebo 환경에서 PID 제어기, 필터, 튜닝 기법에 대한 
 % 관련 연구(섹션 2)에서만 서브섹션 제목-본문 간격을 0으로 축소
 \titlespacing*{\subsection}{0pt}{0.6ex plus .1ex minus .1ex}{0ex}
 \section{관련 연구}
-\subsection{오픈소스 오토파일럿의 표준 구조와 실무 튜닝}
+\subsection{오픈소스 오토파일럿의 구조와 실무 튜닝}
 ArduPilot과 PX4는 외부 자세 제어 루프(P)와 내부 각속도 제어 루프(PID 또는 PI+D)로 구성된 2중 루프 구조를 표준으로 채택하고 있으며, 실기체의 진동, 센서 노이즈, 출력 포화 등에 대응하기 위해 D-term 저역통과 필터(PT1/PT2)와 노치 필터, 적분 제한 및 프리즈(anti-windup), 모터 출력 Slew rate 제한, Feedforward 제어, 센서 필터 체인(자이로/가속도) 등의 기능을 제공한다. 개별 기능의 효과와 튜닝 지침은 풍부하지만, 여러 기법을 동시에 적용했을 때의 상호작용을 어블레이션(ablation) 방식으로 체계적으로 정리한 공개 자료는 제한적이다 [1], [2].
 
-\subsection{PID 적분기 관리: anti-windup과 bumpless 전이}
+\subsection{PID 적분기: anti-windup·bumpless 전이}
 포화 또는 Slew rate 제한이 존재하는 액추에이터에서는 적분기의 과적분이 오버슈트와 긴 복구 시간을 유발할 수 있다. 이를 방지하기 위해 적분 제한(clamping), 백계산 기반 추종형 anti-windup(back-calculation), 조건부 적분(conditional integration), I-freeze/decay(포화 시 적분 동결·감쇠), 그리고 목표치나 제어 게인 변경 시 출력 불연속을 완화하기 위한 \emph{bumpless transfer} 등이 적용된다. 멀티로터에서도 속도 루프의 정상상태 바이어스를 제거하기 위해 rate-PI 제어에 anti-windup을 일반적으로 적용한다 [3], [4].
 
 \subsection{D-term 필터링과 미분 성형}
@@ -196,7 +198,7 @@ ArduPilot과 PX4는 외부 자세 제어 루프(P)와 내부 각속도 제어 �
 \subsection{소스 전환(EST/GT)과 연속 블렌딩}
 센서 또는 추정 소스의 전환(예: 추정값(EST)$\leftrightarrow$참값(GT), 센서 페일오버)은 단계적인 전이(step change)가 발생할 경우 제어 루프에 큰 버스트를 유발할 수 있다. 이를 방지하기 위해 일정 시간 동안 가중치를 0에서 1로 선형 증가시키는 연속 블렌딩(continuous weighting)을 적용하여 전환을 부드럽게 만드는 기법이 센서퓨전 및 로버스트 필터링 분야에서 제안되어 왔다 [9].
 
-\subsection{액추에이터 제약: 포화·출력 변화율 제한과 Slew}
+\subsection{액추에이터 제약: 포화·Slew 제한}
 액추에이터의 포화(saturation)와 출력 변화율 제한(rate limit)은 anti-windup 설계의 핵심 전제 조건이며, 실제 시스템에서는 출력 Slew(명령 변화율 제한)를 통해 전기적·기계적 과도 응답을 억제하고, 구동부 보호 및 제어 명령의 연속성을 확보한다. 멀티로터 제어기에서도 모터별(per-motor) Slew rate 제한 설정이 일반적으로 적용된다 [10], [11].
 
 \section{방법/시스템 구현}
@@ -313,20 +315,18 @@ Slew rate 제한과 출력 클램프는 SIL 제어기 측에서 적용되어
 
 \subsection{시스템 구성 및 실행 절차}
 
-\subsubsection{구성 요약}
 AirSim (\emph{producer})은 IMU 데이터를 \SI{1}{kHz} 주기로 
 Shared Memory에 \emph{write}하고, SIL 제어기 (\emph{consumer})는 이를 
 \emph{read}하여 Mahony 기반 자세(P)–속도(PI+D) 루프를 수행한 뒤 
 PWM 신호를 \SI{400}{Hz}로 \emph{write}한다.  
 AirSim은 해당 PWM 데이터를 \emph{read}하여 모터 모델에 적용한다.  
 
-두 모듈은 \textbf{별도의 프로그램(프로세스)}으로 동작하며, 
+\noindent 두 모듈은 \textbf{별도의 프로그램(프로세스)}으로 동작하며, 
 Shared Memory는 AirSim이 생성·소유하고 SIL 제어기가 
 \emph{attach}하여 read/write한다  
 (\emph{IMU: AirSim→SIL, PWM: SIL→AirSim}).
 
-\subsubsection{실행 절차}
-프로그램 실행 시 내부적으로 다음 절차가 순차적으로 수행된다.
+\noindent 프로그램 실행 시 내부적으로 다음 절차가 순차적으로 수행된다.
 \begin{enumerate}
   \item \textbf{AirSim 초기화:} AirSim 모듈을 구동하여 월드 및 기체 파라미터를 고정하고, 시뮬레이터의 시간 및 물리 시뮬레이션 간의 \(\Delta t\) 일관성을 검증한다.
   \item \textbf{SIL 제어기 설정:} SIL 제어기를 시작하고 메인 제어 스레드의 우선순위를 상향하며, 타이머 분해능을 \SI{1}{ms}로 설정한다.
@@ -342,7 +342,7 @@ Shared Memory는 AirSim이 생성·소유하고 SIL 제어기가
 \begin{figure}[htb]
   \centering
   \includegraphics[width=\columnwidth]{img/xsim_test.png}
-  \caption{비행 중 주파수 측정 화면: IMU, MAG, BARO, LOC, PWM (Hz) 로그.}
+  \caption{비행 중 센서 주파수 측정 화면.}
 \end{figure}
 
 \subsection{구현 핵심 요약 및 코드 발췌}
@@ -376,32 +376,6 @@ optional<ImuSample> tryReadImu() {
   if (imuQ.try_dequeue(s))
     return s;                // new IMU sample available
   return nullopt;            // no new sample; caller keeps previous one
-}
-\end{lstlisting}
-
-\noindent\textbf{PWM Producer (SIL Controller)}
-\begin{lstlisting}[language=C++, caption={PWM producer}, label=lst:pwm_producer]
-struct PwmCmd { 
-  int64_t ts_ns;             // timestamp [ns]
-  uint16_t m[4];             // motor PWM outputs [µs]
-};
-
-SpscQueue<PwmCmd> pwmQ;      // single-producer, single-consumer queue
-
-void onControlStep() {       // called at controller rate (e.g., 400 Hz)
-  PwmCmd c{ nowNanos(), mixOutputs() };
-  pwmQ.try_enqueue(c);       // non-blocking; may drop command if full
-}
-\end{lstlisting}
-
-
-\noindent\textbf{PWM Consumer (AirSim)}
-\begin{lstlisting}[language=C++, caption={PWM consumer pseudocode}, label=lst:pwm_consumer]
-// Reads motor commands from shared memory and applies to rotor model
-void onRotorUpdate() {
-  PwmCmd c;
-  if (pwmQ.try_dequeue(c))
-    applyPwm(c.m);           // update motor model with latest PWM [µs]
 }
 \end{lstlisting}
 
@@ -486,15 +460,8 @@ void update(Mahony& m, const ImuSample& s, int64_t prev_ns) {
 % (삭제) 섹션 IV 수치 교차참조 표는 본문 서술로 대체
 
 \subsection{정량 결과(로그)}
-% Hover-bias 10 Hz 로그 발췌와 간단 요약(결과 섹션으로 이동)
-\begin{lstlisting}[caption={Hover-bias 10 Hz 요약 로그 발췌},label=lst:hover_bias_log]
-hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]= 0.05 -0.12 -0.03 gt[r p y]= 0.05 -0.12 -0.03 yaw[rate,cy]= -0.01,0.00 cp/cr(us)= 0.76/-0.24
-hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1598 1601 1602 est[r p y]= 0.08 -0.20 -0.07 gt[r p y]= 0.08 -0.20 -0.07 yaw[rate,cy]= -0.01,0.00 cp/cr(us)= 0.77/-0.25
-hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1599 1602 1601 est[r p y]= 0.11 -0.28 -0.12 gt[r p y]= 0.11 -0.28 -0.12 yaw[rate,cy]= -0.01,0.00 cp/cr(us)= 0.79/-0.27
-...
-\end{lstlisting}
 
-\noindent 위 로그의 초기 10개 스냅샷(호버 구간)에서 요약 통계는 다음과 같다: yaw-rate \(\approx 0.00\,\mathrm{rad/s}\), cp \(\approx 0.77\,\mu s\), cr \(\approx -0.25\,\mu s\). 추정치(est)와 GT의 오일러 각은 \(\sim 0.0{-}0.1^\circ\) 범위로 일치한다.
+\noindent 내부 로그의 초기 10개 스냅샷(호버 구간)에서 요약 통계는 다음과 같다: yaw-rate \(\approx 0.00\,\mathrm{rad/s}\), cp \(\approx 0.77\,\mu s\), cr \(\approx -0.25\,\mu s\). 추정치(est)와 GT의 오일러 각은 \(\sim 0.0{-}0.1^\circ\) 범위로 일치한다.
 
 
 \begin{table}[htb]
@@ -532,13 +499,7 @@ RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스
 요약하면, RPC 경로는 직렬화·컨텍스트 스위칭·네트워킹 오버헤드로 인해 목표 주파수 달성이 어려운 반면, 공유메모리 경로는 목표 주파수를 일관되게 유지하였다. 이 결과는 제어기/필터 블록을 \emph{SIL 제어기}에서 검증 후 실제 FC에 소스 수준으로 신속 이식할 수 있음을 뒷받침한다.
 
 \subsubsection{통신 경로 비교 요약 및 로그(SIL Controller)}
-아래 표는 RPC와 Shared Memory 경로의 측정 주파수를 요약하며(표~\ref{tab:rpc_shm_rates}), 이어지는 로그는 SHM 기반 루프의 발췌 예시이다. 워밍업 \SI{10}{s}를 제외한 동일 분석 윈도우에서 수집하였다.
-
-\begin{lstlisting}[caption={실제 로그 발췌(hover\_bias, 10 Hz 요약)},label=lst:rate_log,breakindent=0pt,breakautoindent=false]
-hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1597 1599 1601 1602 est[r p y]= 0.00 -0.00 -0.00 gt[r p y]= 0.00 -0.00 -0.00 yaw[rate,cy]= -0.00,0.00 cp/cr(us)= 0.00/-0.00
-hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1598 1602 1602 est[r p y]= 0.02 -0.04 -0.01 gt[r p y]= 0.02 -0.04 -0.01 yaw[rate,cy]= -0.00,0.00 cp/cr(us)= 0.66/-0.20
-hover_bias fr+1 rl+3 fl+5 rr+6 mix[FR RL FL RR]= 1598 1598 1602 1601 est[r p y]= 0.05 -0.12 -0.03 gt[r p y]= 0.05 -0.12 -0.03 yaw[rate,cy]= -0.01,0.00 cp/cr(us)= 0.77/-0.25
-\end{lstlisting}
+아래 표는 RPC와 Shared Memory 경로의 측정 주파수를 요약한 것이다(표~\ref{tab:rpc_shm_rates}). 워밍업 \SI{10}{s}를 제외한 동일 분석 윈도우에서 수집하였다.
 
 \begin{table}[htb]
 \centering
@@ -560,7 +521,7 @@ PWM & 340.0 & 400.0 \\
 \begin{figure}[htb]
   \centering
   % \includegraphics[width=\columnwidth]{images/log_segments.png}
-  \caption{실제 로그 발췌(hover\_bias, 10 Hz 요약). 자세한 스냅샷은 리스트 \ref{lst:hover_bias_log} 참조.}
+  \caption{실제 로그 발췌(hover\_bias, 10 Hz 요약) 예시.}
   \label{fig:log_segments}
 \end{figure}
 
@@ -568,10 +529,10 @@ PWM & 340.0 & 400.0 \\
 본 연구는 AirSim 내 공유메모리 기반 고주파 폐루프와 경량 안정화 패키지를 결합해, 시뮬레이터/개발 환경에서 안전하고 재현 가능하게 제어기를 벤치마크·튜닝할 수 있는 실용 프레임을 제시했다. 외부 프로그램(\emph{SIL controller})을 통해 IMU \(\sim\!1\,kHz\), Barometer \(\sim\!100\,Hz\), PWM \(400\,Hz\) 루프를 달성했고, 실제 로그로 이를 확인하였다.
 
 \begin{itemize}
-  \item \textbf{고주파 폐루프 달성}: in-process Shared Memory + SPSC로 지연/지터를 낮추고, \emph{SIL controller}에서 IMU \(\sim\!1\,kHz\), Barometer \(\sim\!100\,Hz\), PWM \(400\,Hz\)를 안정적으로 유지(리스트 \ref{lst:rate_log}).
-  \item \textbf{스파이크/포화 감소, 자세 품질 개선}: D-term PT2$\times$2+클램프, Trim 램프-인, 추정기 게인 EMA 스무딩, EST/GT 연속 블렌딩, yaw rate-PI(anti-windup), 모터 Slew 제한의 결합으로 peak-to-peak와 포화 점유율을 유의하게 낮추고 yaw 정지(rate$\to$0), Attitude RMS를 개선.
-  \item \textbf{재현 가능한 벤치마크}: 워밍업·윈도우·시나리오(S1--S4)와 공통 파라미터를 고정한 절차를 제시, 로그·표준 지표로 비교 가능성을 확보.
-  \item \textbf{이식성}: 구성 요소를 FC 구조에 맞춰 모듈화하여, 시뮬레이터에서 검증한 동일 구조를 실제 FC로 최소 변경 이식 가능.
+\item \textbf{고주파 폐루프 달성}: in-process Shared Memory + SPSC로 지연/지터를 낮추고, \emph{SIL controller}에서 IMU \(\sim\!1\,kHz\), Barometer \(\sim\!100\,Hz\), PWM \(400\,Hz\)를 안정적으로 유지하였다.
+\item \textbf{스파이크/포화 감소, 자세 품질 개선}: D-term PT2$\times$2+클램프, Trim 램프-인, 추정기 게인 EMA 스무딩, EST/GT 연속 블렌딩, yaw rate-PI(anti-windup), 모터 Slew 제한의 결합으로 peak-to-peak와 포화 점유율을 유의하게 낮추고 yaw 정지(rate$\to$0), Attitude RMS를 개선하였다.
+\item \textbf{재현 가능한 벤치마크}: 워밍업·윈도우·시나리오(S1--S4)와 공통 파라미터를 고정한 절차를 제시하여, 로그·표준 지표로 비교 가능성을 확보하였다.
+\item \textbf{이식성}: 구성 요소를 FC 구조에 맞춰 모듈화하여, 시뮬레이터에서 검증한 동일 구조를 실제 FC로 최소 변경 이식 가능함을 보였다.
 \end{itemize}
 
 향후 과제로는 (i) 동적 노치 자동화와 추가 필터 체인 최적화, (ii) magnetometer/altitude (BARO) 통합 및 EKF 대체 비교, (iii) 다양한 부하/스케줄링 조건에서의 지연/지터 정량화, (iv) ROS2·HIL·실기체 포팅을 통한 실기체 검증, (v) 자동 튜닝/안정성 진단 도구화가 있다.
