@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>SW 수업 발표 · 고주파 AirSim–SIL 연동</title>
+    <link rel="stylesheet" href="https://unpkg.com/reveal.js@5/dist/reveal.css" />
+    <link rel="stylesheet" href="https://unpkg.com/reveal.js@5/dist/theme/black.css" id="theme" />
+    <style>
+      :root { --r-main-font: 'Noto Sans KR', 'Segoe UI', Arial, sans-serif; }
+      .reveal { font-size: 30px; }
+      .reveal h1, .reveal h2, .reveal h3 { text-transform: none; }
+      .reveal section img { border: 0; box-shadow: none; }
+      .small { font-size: 0.8em; }
+      .xsmall { font-size: 0.65em; }
+      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+      .metric { font-size: 0.9em; line-height: 1.45; }
+      html, body { background: #1e1e1e !important; }
+      .reveal { background: #1e1e1e !important; }
+      .reveal .slides { background: transparent; }
+      .badge { display:inline-block; padding:2px 8px; border-radius:8px; background:#2dd36f; color:#000; font-size:0.6em; margin-left:8px; }
+      ul { margin: 0; }
+      li { margin: 10px 0; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace; }
+    </style>
+  </head>
+  <body>
+    <div class="reveal">
+      <div class="slides">
+
+        <!-- 1. Why HF AirSim–SIL -->
+        <section>
+          <h1>왜 고주파 AirSim–SIL 연동이 필요한가</h1>
+          <ul>
+            <li>RPC 기반 연동의 지연·지터로 고주파 폐루프 유지 한계</li>
+            <li>제어기 안정화·튜닝을 위한 고정밀·고주기 센서/구동 경로 필요</li>
+            <li>실기 FC 구조와 유사한 파이프라인으로 이식성/재현성 확보</li>
+          </ul>
+        </section>
+
+        <!-- 2. 배경/문제정의 -->
+        <section>
+          <h2>배경 · 문제 정의</h2>
+          <ul>
+            <li>RPC 경로: 왕복 지연·지터로 HF 루프 붕괴 및 PWM 저하(예: 340 Hz)</li>
+            <li>요구사항: IMU ≥ 1 kHz 입력 처리, PWM 400 Hz 고정, 모노토닉 Δt</li>
+            <li>해결책: in‑process 공유메모리(SPSC, zero‑copy)로 지연/지터 최소화</li>
+            <li>안정화 목표: 출력 스파이크 억제, 포화율 0%, yaw 정지</li>
+          </ul>
+        </section>
+
+        <!-- 3. 제안 개요 -->
+        <section>
+          <h2>제안: 공유메모리(SPSC) 기반 AirSim–SIL 통합</h2>
+          <ul>
+            <li>OS 공유메모리 + SPSC 링버퍼, non‑blocking, zero‑copy</li>
+            <li>IMU ≈ 1 kHz(벤치마크 경로 ~10^5/s 처리), PWM 400 Hz<span class="badge">달성</span></li>
+            <li>고해상도 타임스탬프(ns), 드롭/오버라이트율 모니터링</li>
+          </ul>
+        </section>
+
+        <!-- 4. 아키텍처 -->
+        <section>
+          <h2>시스템 아키텍처</h2>
+          <ul>
+            <li>AirSim Sensors → Shared Memory → SIL Estimator/Controller → PWM → AirSim</li>
+            <li>단일 생산자/소비자(SPSC)로 단순·예측 가능한 타이밍</li>
+            <li>센서 타입 메타데이터 + 모노토닉 시계 기반 Δt 계산</li>
+          </ul>
+          <p class="small">참고: `x_memory/fc_ring.h`, `x_memory/fc_memory.h`</p>
+        </section>
+
+        <!-- 5. IPC 설계 -->
+        <section>
+          <h2>AirSim 측 설계 · 센서/PWM → Shared Memory</h2>
+          <ul>
+            <li><b>IMU(ACC, GYRO)</b>: 전용 스레드에서 샘플 생성 → <span class="mono">ImuSlot</span> 링버퍼 write, <span class="mono">imu_head_seq</span> 증가, <span class="mono">timestamp(ns)</span></li>
+            <li><b>BARO</b>: 100 Hz 타이머 → <span class="mono">BaroData</span> 최신값 write, <span class="mono">baro_sequence/baro_ready</span> 갱신</li>
+            <li><b>GNSS(NED)</b>: 10 Hz(위치/속도) → 센서타입+<span class="mono">ts_ns</span> 규약으로 write</li>
+            <li><b>PWM</b>: 400 Hz 폴링 → <span class="mono">PwmSlot</span> 링버퍼에서 dequeue 후 AirSim ROTOR에 적용</li>
+          </ul>
+          <p class="small">참고 파일: <span class="mono">x_memory/airsim_server.cpp</span>, <span class="mono">x_memory/fc_ring.h</span></p>
+          <div style="height:12px;"></div>
+          <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+            <thead>
+              <tr style="border-bottom:1px solid #555;">
+                <th style="text-align:left; padding:4px 6px;">채널</th>
+                <th style="text-align:left; padding:4px 6px;">역할</th>
+                <th style="text-align:left; padding:4px 6px;">SHM 구조/필드</th>
+                <th style="text-align:right; padding:4px 6px;">주기(Hz)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="padding:4px 6px;">IMU</td>
+                <td style="padding:4px 6px;">Producer(AirSim)</td>
+                <td style="padding:4px 6px;"><span class="mono">ImuSlot{ImuData, seq}</span>, <span class="mono">timestamp(ns)</span></td>
+                <td style="text-align:right; padding:4px 6px;">1000</td>
+              </tr>
+              <tr>
+                <td style="padding:4px 6px;">BARO</td>
+                <td style="padding:4px 6px;">Producer(AirSim)</td>
+                <td style="padding:4px 6px;"><span class="mono">BaroData{alt, ts_ns, ...}</span>, <span class="mono">baro_ready</span></td>
+                <td style="text-align:right; padding:4px 6px;">100</td>
+              </tr>
+              <tr>
+                <td style="padding:4px 6px;">GNSS(NED)</td>
+                <td style="padding:4px 6px;">Producer(AirSim)</td>
+                <td style="padding:4px 6px;">타입+<span class="mono">ts_ns</span> 메타, NED 위치/속도</td>
+                <td style="text-align:right; padding:4px 6px;">10</td>
+              </tr>
+              <tr>
+                <td style="padding:4px 6px;">PWM</td>
+                <td style="padding:4px 6px;">Consumer(AirSim)</td>
+                <td style="padding:4px 6px;"><span class="mono">PwmSlot{PWMData, seq}</span>, 적용 시 Slew/클램프 상위에서 처리</td>
+                <td style="text-align:right; padding:4px 6px;">400</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="xsmall" style="opacity:0.8; margin-top:6px;">모든 채널은 모노토닉 고해상도 <span class="mono">ts_ns</span> 기반 Δt 계산; SPSC, non‑blocking, zero‑copy. (선택) MAG 100 Hz는 yaw 보정용으로 별도 경로 구성 가능.</div>
+        </section>
+
+        <!-- 6. SIL 제어 구조 -->
+        <section>
+          <h2>SIL 제어 구조</h2>
+          <ul>
+            <li><b>상태추정</b>: Mahony(EMA 신뢰도, 자이로 바이어스 추정, Δt 가변 적분)</li>
+            <li><b>외부 루프</b>: Attitude P — 소각오차 → 각속도 참조</li>
+            <li><b>내부 루프</b>: Rate PI + D — PT2×2, anti‑windup, D‑term 클램프(±12 µs)</li>
+            <li><b>출력 성형</b>: 호버 트림(≈3 s)·램프‑인(≈0.8 s), Slew‑rate 제한, PWM 400 Hz</li>
+          </ul>
+          <p class="small">비고: AirSim 측은 SHM PWM 패스스루만 수행(속도/위치 루프 미사용). 참고: <span class="mono">x_memory/shm/test_client.cpp</span>, <span class="mono">x_memory/attitude_estimator.hpp</span></p>
+        </section>
+
+        <!-- 7. Mahony 상세 -->
+        <section>
+          <h2>Mahony 필터 상세</h2>
+          <ul>
+            <li>|a|≈g 구간에서만 가속도 보정, 신뢰도는 τ 기반 EMA</li>
+            <li>자이로 바이어스 온라인 추정(정지/저가속 조건)</li>
+            <li>쿼터니언 적분 후 매 스텝 정규화로 수치 안정성</li>
+          </ul>
+          <p class="small">LaTeX 코드 스니펫: EMA trust, bias tracking</p>
+        </section>
+
+        <!-- 8. 내부/외부 루프 및 안정화 -->
+        <section>
+          <h2>Attitude P → Rate PI + D · 출력 성형</h2>
+          <ul>
+            <li>Attitude P: 각도→속도, 호버 트림(3 s)·램프‑인(0.8 s)</li>
+            <li>Rate‑PI: 조건부 적분, anti‑windup, yaw 축 0 rad/s 우선</li>
+            <li>D‑term: 자이로율 PT2×2 + 클램프(±12 µs), Slew‑rate 제한</li>
+          </ul>
+          <p class="small">참고: `x_memory/shm/test_client.cpp`, `x_memory/xsim_client.cpp`</p>
+        </section>
+
+        <!-- 9. 소스 코드 수정 요약 -->
+        <section>
+          <h2>소스 코드 수정 요약</h2>
+          <ul>
+            <li>`x_memory/fc_ring.h` · `fc_memory.h`: Win32 SHM SPSC 링버퍼, IMU/PWM 슬롯, ns 타임스탬프</li>
+            <li>`x_memory/airsim_server.cpp`: PWM 400 Hz 폴링·적용, BARO 100 Hz publish</li>
+            <li>`x_memory/airsim_client.cpp` · `flight_client.cpp`: 400 Hz PWM 제출 경로</li>
+            <li>`x_memory/xsim_client.cpp`: AttP→RatePI+D, anti‑windup, 램프‑인</li>
+            <li>`x_memory/attitude_estimator.hpp`: Mahony 업데이트 루프(KP/KI, 정규화)</li>
+          </ul>
+        </section>
+
+        <!-- 10. 성능/측정 -->
+        <section>
+          <h2>성능 · 지표(대표)</h2>
+          <ul>
+            <li>IMU 입력(Hz): SHM ≈ 78,383 vs RPC ≈ 15,516</li>
+            <li>PWM 출력: SHM 400 Hz vs RPC 340 Hz</li>
+            <li>Attitude RMS 및 PWM p2p 개선, 포화율 0%</li>
+          </ul>
+          <p class="xsmall">조건: 동일 PC/월드, 60–120 s 평균</p>
+        </section>
+
+        <!-- 11. 튜닝/운용 가이드 -->
+        <section>
+          <h2>튜닝 · 운용 가이드</h2>
+          <ul>
+            <li>Mahony: τ(EMA), Kp/Ki → 정지 안정성·외란 복원 속도 트레이드오프</li>
+            <li>AttP, RatePI, D‑term 클램프/필터 상수 → PWM p2p·포화율 관리</li>
+            <li>윈도우 기반 Hz/드롭율 지표를 보며 단계적으로 상향</li>
+          </ul>
+        </section>
+
+        <!-- 12. 결론/향후과제 -->
+        <section>
+          <h2>결론 · 향후 과제</h2>
+          <ul>
+            <li>공유메모리 기반 고주파 AirSim–SIL로 안정화/튜닝 프레임 제공</li>
+            <li>실기 FC 구조 반영 → 이식성·재현성 향상</li>
+            <li>향후: EKF/ML 추정기 대체, MPC/FF 확장, 멀티센서 융합</li>
+          </ul>
+        </section>
+
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/reveal.js@5/dist/reveal.js"></script>
+    <script>
+      Reveal.initialize({
+        hash: true,
+        slideNumber: true,
+        controls: true,
+        progress: true,
+        center: true,
+        transition: 'slide',
+        width: 1280,
+        height: 720,
+      });
+    </script>
+  </body>
+  </html>
+
