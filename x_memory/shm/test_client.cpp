@@ -23,6 +23,11 @@
 #include "lib/PidController.hpp"
 #include "../attitude_estimator.hpp"
 
+// 공용 PWM/시간 상수
+static const int TAKEOFF_US = 1800;
+static const int HOVER_US   = 1600;
+static const int TAKEOFF_MS = 7000; // milder takeoff duration
+
 // Scenario selection
 #define SCENARIO_CARDINAL_TILT     1
 #define SCENARIO_ALL_1600          2
@@ -76,8 +81,8 @@ static void scenario_cardinal_tilt(XSimIo& io, LogHelper& logger)
 				// done
 				running = false;
 			} else if (elapsed_ms < 2000) {
-				// first 5 seconds: takeoff at 1800us
-				r1 = r2 = r3 = r4 = 1500;
+				// 첫 구간: 명시된 TAKEOFF_US로 이륙 (예: 1800us)
+				r1 = r2 = r3 = r4 = TAKEOFF_US;
 			} else if (in_hold) {
 				switch (slot) {
 					case 2: // Forward: front low, rear high
@@ -232,9 +237,6 @@ static void scenario_takeoff_hover_bias(XSimIo& io, LogHelper& logger, int max_d
     double trim_ex_sum = 0.0, trim_ey_sum = 0.0; int trim_count = 0;
     const float TRIM_K_US_PER_RAD = 80.0f; // convert avg angle error -> microseconds
 
-    const int TAKEOFF_US = 1800;
-    const int HOVER_US   = 1600;
-    const int TAKEOFF_MS = 7000; // milder takeoff duration
     // Per-rotor biases (FR, RL, FL, RR)
     const int BIAS_FR = 1;
     const int BIAS_RL = 3;

@@ -22,6 +22,18 @@
       ul { margin: 0; }
       li { margin: 10px 0; }
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace; }
+      /* flow table for controller diagram */
+      .flow-table { width: 100%; border-collapse: separate; border-spacing: 14px 18px; table-layout: fixed; }
+      .flow-table col.arrow { width: 6%; }
+      .flow-table col.block { width: calc((100% - 18%) / 4); }
+      .flow-table td { text-align: center; vertical-align: middle; padding: 0; overflow: visible; }
+      .flow-box { background:#2a2a2a; color:#eee; border:1px solid #999; border-radius:12px; padding:14px 12px; }
+      .flow-arrow { color:#bbb; font-weight:700; font-size:1.2em; }
+      .flow-muted { color:#ccc; font-size:0.7em; display:block; margin-top:4px; }
+      /* scroll helpers */
+      .scroll-y { max-height: 62vh; overflow-y: auto; padding-right: 6px; }
+      .scroll-y::-webkit-scrollbar { width: 8px; }
+      .scroll-y::-webkit-scrollbar-thumb { background:#555; border-radius:8px; }
     </style>
   </head>
   <body>
@@ -140,7 +152,19 @@
             <li>자이로 바이어스 온라인 추정(정지/저가속 조건)</li>
             <li>쿼터니언 적분 후 매 스텝 정규화로 수치 안정성</li>
           </ul>
+          <figure style="margin-top:16px;">
+            <img src="assets/mahony_flow.svg" alt="Mahony AHRS 신호 흐름(비례/적분 보정, 바이어스 추정, q 정규화)" width="1180" height="520" style="max-width:100%; height:auto; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;" />
+            <figcaption class="xsmall" style="text-align:center; opacity:0.85; margin-top:6px;">Mahony AHRS 신호 흐름(비례/적분 보정, 바이어스 추정, q 정규화)</figcaption>
+          </figure>
           <p class="small">LaTeX 코드 스니펫: EMA trust, bias tracking</p>
+          <aside class="notes">
+            <ul>
+              <li>비행 중 가감속이 있으면 가속도계는 중력 + 기체 고유가속(특정힘)을 측정하므로, <b>가속도계만으로는</b> 중력 방향이 맞지 않아 자세를 신뢰하기 어렵다.</li>
+              <li><b>자이로</b>로 각속도를 적분해 단기 자세를 추적하고, 드리프트는 <b>|a|≈g 구간</b>에서만 가속도로 보정한다.</li>
+              <li><b>정지/등속(비중력 선형가속 ≈ 0)</b> 또는 완만한 기동에서는 가속도 방향이 중력 방향과 거의 일치하므로 자세 보정에 유용하다.</li>
+              <li>합성가속의 크기 |a|는 항상 g가 아니다. 그래서 <b>| |a|−g | &lt; ε</b>일 때만 신뢰도 α(EMA)를 높이고, 그 외 구간에선 α를 낮춰 보정 영향이 작아지도록 한다.</li>
+            </ul>
+          </aside>
         </section>
 
         <!-- 8. 내부/외부 루프 및 안정화 -->
@@ -151,19 +175,175 @@
             <li>Rate‑PI: 조건부 적분, anti‑windup, yaw 축 0 rad/s 우선</li>
             <li>D‑term: 자이로율 PT2×2 + 클램프(±12 µs), Slew‑rate 제한</li>
           </ul>
+          <div style="margin-top:16px;">
+            <table class="flow-table" aria-label="Attitude P to Rate PI + D flow (full)">
+              <colgroup>
+                <col style="width:11.7%" />  <!-- θr -->
+                <col style="width:3%" />     <!-- → -->
+                <col style="width:11.7%" />  <!-- Σ(eθ) -->
+                <col style="width:3%" />
+                <col style="width:11.7%" />  <!-- Attitude P -->
+                <col style="width:3%" />
+                <col style="width:11.7%" />  <!-- Σ(eω) -->
+                <col style="width:3%" />
+                <col style="width:11.7%" />  <!-- Rate PI -->
+                <col style="width:3%" />
+                <col style="width:11.7%" />  <!-- Σ(PI+D) -->
+                <col style="width:3%" />
+                <col style="width:11.7%" />  <!-- PWM -->
+              </colgroup>
+              <tbody>
+                <!-- 상단 메인 경로 -->
+                <tr>
+                  <td class="flow-box">θᵣ (자세 참조)</td>
+                  <td class="flow-arrow">→</td>
+                  <td class="flow-box">Σ<span class="flow-muted">eθ = θᵣ − θ</span></td>
+                  <td class="flow-arrow">→</td>
+                  <td class="flow-box">Attitude P<span class="flow-muted">eθ → ωᵣ</span></td>
+                  <td class="flow-arrow">→</td>
+                  <td class="flow-box">Σ<span class="flow-muted">eω = ωᵣ − ω</span></td>
+                  <td class="flow-arrow">→</td>
+                  <td class="flow-box">Rate PI<span class="flow-muted">조건부 적분 · anti‑windup</span></td>
+                  <td class="flow-arrow">→</td>
+                  <td class="flow-box">Σ<span class="flow-muted">PI + D 합성</span></td>
+                  <td class="flow-arrow">→</td>
+                  <td class="flow-box">PWM 400 Hz<span class="flow-muted">Slew‑rate 제한</span></td>
+                </tr>
+                <!-- 하단 보조 경로: θ(q), Gyro ω, D-term -->
+                <tr>
+                  <td class="flow-box">θ(q)<span class="flow-muted">자세 추정</span></td>
+                  <td class="flow-arrow">↗</td>
+                  <td></td>
+                  <td></td>
+                  <td></td>
+                  <td></td>
+                  <td class="flow-box">ω (자이로)<span class="flow-muted">PT2×2</span></td>
+                  <td class="flow-arrow">↗</td>
+                  <td></td>
+                  <td class="flow-arrow">↘</td>
+                  <td class="flow-box">D‑term<span class="flow-muted">자이로 ω → PT2×2 → 클램프</span></td>
+                  <td class="flow-arrow">↗</td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="xsmall" style="opacity:0.85; text-align:center; margin-top:6px;">
+              θᵣ/θ(q) 비교 → Attitude P(ωᵣ) → (ωᵣ−ω) → Rate PI + D‑term → Σ → Slew‑rate → PWM
+            </div>
+          </div>
           <p class="small">참고: `x_memory/shm/test_client.cpp`, `x_memory/xsim_client.cpp`</p>
         </section>
 
-        <!-- 9. 소스 코드 수정 요약 -->
+        <!-- 9. 수정 경로 요약 -->
         <section>
-          <h2>소스 코드 수정 요약</h2>
-          <ul>
-            <li>`x_memory/fc_ring.h` · `fc_memory.h`: Win32 SHM SPSC 링버퍼, IMU/PWM 슬롯, ns 타임스탬프</li>
-            <li>`x_memory/airsim_server.cpp`: PWM 400 Hz 폴링·적용, BARO 100 Hz publish</li>
-            <li>`x_memory/airsim_client.cpp` · `flight_client.cpp`: 400 Hz PWM 제출 경로</li>
-            <li>`x_memory/xsim_client.cpp`: AttP→RatePI+D, anti‑windup, 램프‑인</li>
-            <li>`x_memory/attitude_estimator.hpp`: Mahony 업데이트 루프(KP/KI, 정규화)</li>
-          </ul>
+          <h2>수정 경로 · 파일 요약</h2>
+          <div class="scroll-y">
+          <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+            <thead>
+              <tr style="border-bottom:1px solid #555;">
+                <th style="text-align:left; padding:6px 8px; width:42%;">경로/파일</th>
+                <th style="text-align:left; padding:6px 8px;">수정·역할</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="padding:6px 8px;"><span class="mono">x_memory/fc_ring.h</span> · <span class="mono">fc_memory.h</span></td>
+                <td style="padding:6px 8px;">Win32 공유메모리 SPSC 링버퍼, IMU/PWM 슬롯, ns 타임스탬프</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 8px;"><span class="mono">x_memory/airsim_server.cpp</span></td>
+                <td style="padding:6px 8px;">센서 publish, PWM 400 Hz 적용 루프(폴링)</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 8px;"><span class="mono">x_memory/airsim_client.cpp</span> · <span class="mono">flight_client.cpp</span></td>
+                <td style="padding:6px 8px;">클라이언트 측 400 Hz PWM 제출 경로</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 8px;"><span class="mono">x_memory/xsim_client.cpp</span></td>
+                <td style="padding:6px 8px;">Attitude‑P → Rate‑PI + D 제어, anti‑windup, 램프‑인</td>
+              </tr>
+              <tr>
+                <td style="padding:6px 8px;"><span class="mono">x_memory/attitude_estimator.hpp</span></td>
+                <td style="padding:6px 8px;">Mahony 업데이트(Kp/Ki, EMA 신뢰도, 정규화·바이어스 추정)</td>
+              </tr>
+            </tbody>
+          </table>
+          <div style="height:12px;"></div>
+          <h3 class="small" style="margin:0;">클라이언트 클래스 구조</h3>
+          <pre class="mono xsmall" style="background:#111; color:#eee; padding:10px 12px; border:1px solid #444; border-radius:8px; line-height:1.35;">
+xsim_client (program)
+├─ Rx thread @ ~1 kHz
+│    └─ XSimIo.consume_telem(...) → AttitudeEstimator.update(gyro, accel, dt) → q_est
+├─ Main loop @ 400 Hz
+│    └─ read q_est → 제어/믹스 → writeRotors(XSimIo, PWM[4])
+├─ AttitudeEstimator (Mahony-style)
+│    ├─ update(gyro, accel, dt)
+│    └─ getQuaternion(w,x,y,z)
+├─ XSimIo / x_xsim.h
+│    ├─ consume_telem(last_seq, on_sample)
+│    └─ submit_pwm(pwm)
+└─ Helpers / Constants
+     ├─ test_rotors(), bias/램프/클램프
+     └─ SLEW_US_PER_TICK, PULSE_* 등
+          </pre>
+          </div>
+        </section>
+
+        <!-- 9.1 AirSim 구현 -->
+        <section>
+          <h2>AirSim 구현(센서·Telemetry)</h2>
+          <pre class="mono xsmall" style="background:#111; color:#eee; padding:10px 12px; border:1px solid #444; border-radius:8px; line-height:1.35;">
+AirSim (UE Blocks)
+└─ AirLib Sensors
+    ├─ ImuBase / ImuSimple / BarometerSimple / MagnetometerSimple ...
+    └─ ImuXsim (우리 확장)
+         ├─ resetImplementation()
+         └─ update() → XSimTelemetry
+                │
+                ▼
+          x_xsim 서버
+            ├─ server_create("AirSimXsim")
+            └─ publish_telem(XSimTelemetry @ ~1 kHz)
+          </pre>
+          <p class="small">주요 파일: <span class="mono">AirLib/include/sensors/imu/ImuXsim.hpp</span>, <span class="mono">x_memory/shm/x_xsim.h</span>, Blocks <span class="mono">settings.json</span>(ImuXsim 센서 활성화).</p>
+        </section>
+
+        <!-- 9.2 SIL 구현 -->
+        <section>
+          <h2>SIL 구현(xsim_client) · 파일 구조 트리</h2>
+          <pre class="mono xsmall" style="background:#111; color:#eee; padding:10px 12px; border:1px solid #444; border-radius:8px; line-height:1.35;">
+x_memory/
+├─ xsim_client.cpp          // main: Rx thread, 400 Hz loop, PWM write, 테스트 로터, Slew/클램프, 로그
+├─ attitude_estimator.hpp   // Mahony 스타일 자세 추정기 (gyro+acc, |a|≈g 게이트, q 정규화)
+└─ lib/
+     ├─ PidController.hpp   // PID/PI 블록 (Attitude/Rate 제어에 사용 가능)
+     ├─ XSimIo.hpp          // x_xsim 래퍼: consume_telem, submit_pwm 등 I/O 편의
+     ├─ AttitudeUtils.hpp   // 쿼터니언↔Euler, 에러각 계산 등 자세 유틸
+     └─ LogHelper.hpp       // 파일/콘솔 로그, Hz·상태 기록 헬퍼
+          </pre>
+          <p class="small">요약: <span class="mono">xsim_client.cpp</span>이 중심이고, 나머지 헤더들은 “추정기 / I/O / 제어 유틸 / 로깅”으로 역할 분리된 구조입니다.</p>
+        </section>
+
+        <!-- 9.3 공유메모리 구현 -->
+        <section>
+          <h2>공유메모리 구현</h2>
+          <pre class="mono xsmall" style="background:#111; color:#eee; padding:10px 12px; border:1px solid #444; border-radius:8px; line-height:1.35;">
+신규 경로: XSim Telemetry/PWM
+└─ x_memory/shm/x_xsim.h
+    ├─ struct XSimTelemetry { gyro, acc, quat, alt, mag, loc_ned, timestamp, seq, ... }
+    ├─ struct XSimPwm      { rotor[4], timestamp, seq, ... }
+    └─ class x_xsim
+         ├─ server_create(name)
+         ├─ publish_telem(const XSimTelemetry&)
+         ├─ consume_telem(last_seq, on_sample)
+         └─ submit_pwm(const XSimPwm&)
+
+기존 샘플용 경로
+└─ x_memory/fc_ring.h / fc_memory.h
+    ├─ IMU/PWM/Baro 단일·링버퍼 채널
+    └─ 예제: airsim_server.cpp, airsim_client.cpp, flight_client.cpp
+          </pre>
+          <p class="small">실제 SIL 경로는 <span class="mono">ImuXsim → x_xsim → xsim_client</span>로 이어지고, <span class="mono">fc_ring/fc_memory</span>는 비교·테스트용으로 남겨둔 구조입니다.</p>
         </section>
 
         <!-- 10. 성능/측정 -->

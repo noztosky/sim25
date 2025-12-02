@@ -132,7 +132,7 @@
 \newcommand{\Fig}[1]{Fig.~#1}
 
 \title{AirSim 연동 고주파 제어 벤치마크·안정화 툴킷\\
-AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}
+AirSim-Integrated High-Frequency Control Benchmark-Stabilization Toolkit}
 
 \author{김경목*\,\, 이남훈**\,\, 김성권**}
 \date{}
@@ -155,7 +155,7 @@ AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}
 {\fontsize{10}{12}\selectfont \textsuperscript{1}\, 서울과학기술대학교}\par
 {\fontsize{10}{12}\selectfont \textsuperscript{2}\, 서울과학기술대학교}\par
 {\fontsize{10}{12}\selectfont \textsuperscript{3}\, 서울과학기술대학교}\par\vspace{4pt}
-{\large \bfseries AirSim-Integrated High-Frequency Control Benchmark · Stabilization Toolkit}\par
+{\large \bfseries AirSim-Integrated High-Frequency Control Benchmark-Stabilization Toolkit}\par
 \EngTitleSpacer\par
 \AuthorLine{Kyungmok Kim\textsuperscript{1\textdagger}· Namhoon Lee\textsuperscript{2}· Seongkwon Kim\textsuperscript{3}}\par
 {\fontsize{10}{12}\selectfont \textsuperscript{1}\, Seoul National University of Science and Technology}\par
@@ -426,18 +426,24 @@ void update(Mahony& m, const ImuSample& s, int64_t prev_ns) {
 }
 \end{lstlisting}
 
-\subsection{시나리오 정의}
-본 연구에서는 필터의 강건성 및 외란 내성(robustness and disturbance rejection)을 평가하기 위해 
-다음의 네 가지 시나리오를 구성하였다.
-\begin{enumerate}[label=S\arabic*]
-  \item \textbf{Hover}: 외란이 없는 정지 호버 상태로, 필터의 정상상태 안정성과 잔류 진동 수준을 평가한다.
-  \item \textbf{Gyro Bias}: 자이로 바이어스(\(\pm0.02\!\sim\!0.05\,\si{rad/s}\))를 인위적으로 주입하여, 오프셋 보정 성능 및 장기 안정성을 검증한다.
-  \item \textbf{Dynamic Accel}: \(0.3\!\sim\!0.8\,g\) 진폭, \(0.5\!\sim\!2\,\si{Hz}\) 주파수 범위의 가속도 외란을 인가하여, 가속도 기반 보정 루프의 외란 내성을 평가한다.
-  \item \textbf{Aggressive Tilt}: \(20\!\sim\!35^{\circ}\) 범위의 급격한 자세 명령(램프 또는 스텝 입력)을 통해, 큰 각속도·가속도 조건에서의 필터 수렴 특성을 분석한다.
-\end{enumerate}
+\subsection{실험 시나리오 (S1--S4)}
 
-모든 시나리오는 워밍업 \SI{10}{s} 이후 분석되며, 
-세부 반복 횟수와 분석 윈도우는 섹션~\ref{sec:protocol_metrics}(프로토콜 및 지표)에 따른다.
+본 연구에서는 필터의 강건성 및 외란 내성(robustness and disturbance rejection)을 평가하기 위해 다음의 네 가지 시나리오를 구성하였다.
+
+\begin{enumerate}[label=\textbf{S\arabic*}.]
+  \item \textbf{Hover}  
+  외란이 없는 정지 호버 상태로, 필터의 정상상태 안정성과 잔류 진동 수준을 평가한다.
+
+  \item \textbf{Gyro Bias}  
+  자이로 바이어스(\(\pm0.02 \sim 0.05\,\mathrm{rad/s}\))를 인위적으로 주입하여, 오프셋 보정 성능 및 장기 안정성을 검증한다.
+
+  \item \textbf{Dynamic Accel}  
+  \(0.3 \sim 0.8\,g\) 진폭, \(0.5 \sim 2\,\mathrm{Hz}\) 주파수 범위의 가속도 외란을 인가하여, 가속도 기반 보정 루프의 외란 내성을 평가한다.
+
+  \item \textbf{Aggressive Tilt}  
+  \(20 \sim 35^\circ\) 범위의 급격한 자세 명령(램프 또는 스텝 입력)을 통해, 큰 각속도·가속도 조건에서의 필터 수렴 특성을 분석한다.
+\end{enumerate}
+모든 시나리오는 워밍업 \SI{10}{s} 이후 분석되며, 세부 반복 횟수와 분석 윈도우는 섹션~\ref{sec:protocol_metrics}(프로토콜 및 지표)에 따른다.
 
 
 \subsection{프로토콜 및 지표}\label{sec:protocol_metrics}
@@ -466,7 +472,7 @@ void update(Mahony& m, const ImuSample& s, int64_t prev_ns) {
 
 \begin{table}[htb]
 \centering
-\caption{시나리오별 정량 지표 요약(세로 전치, 워밍업 10 s 제외, 윈도우 30--120 s)}
+\caption{시나리오별 정량 지표 요약}
 \label{tab:results_summary}
 \resizebox{\columnwidth}{!}{%
 \begin{tabular}{lcccc}
@@ -477,7 +483,6 @@ void update(Mahony& m, const ImuSample& s, int64_t prev_ns) {
  sat(\%) & 0 & 0 & 0 & 0 \\
  RMS(deg) & 1.227 & 2.040 & 1.748 & 0.440 \\
  P95(deg) & 0.724 & 0.636 & 1.515 & 0.734 \\
- yawR(rad/s) & 0.000 & 0.000 & 0.000 & 0.000 \\
 \bottomrule
 \end{tabular}%
 }
@@ -485,16 +490,11 @@ void update(Mahony& m, const ImuSample& s, int64_t prev_ns) {
 
 
 \subsubsection{통신 경로 비교: RPC vs Shared Memory}
-\noindent\textbf{비교군/설정}: CAP=1 조건에서 동일 PC/월드/\(\Delta t\)로 RPC 경로와 Shared Memory(SPSC, zero-copy) 경로를 비교하였다.\\
-\noindent\textbf{측정 방법(센서 스캔 주파수)}:\ 
-각 경로(RPC/Shared Memory)에서 센서 입력(IMU, Barometer)과 PWM 출력에 대해 레코드의 타임스탬프(ts\_ns)를 사용해 유효 주파수를 산출하였다. 공정 비교를 위해 60--120 s 분석 윈도우에서 평균/분산을 측정하고, 드롭/오버라이트 비율을 함께 기록하였다.
-\begin{itemize}
-  \item \textbf{측정 대상}: IMU 입력(목표 1000 Hz), Barometer 입력(목표 100 Hz), PWM 출력(목표 400 Hz)
-  \item \textbf{산출 방식}: 인접 샘플 간 \(\Delta t\) 역수로 순간 주파수 계산 후, 윈도우 평균(Hz)과 지연/지터 통계(P50/P95) 보고
-  \item \textbf{환경 고정}: 동일 PC/월드/\(\Delta t\), 스레드 우선순위 상향, Windows 타이머 분해능 1 ms, 패킷 크기 고정(Nagle 옵션 명시)
-\end{itemize}
-RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스택 오버헤드로 인해 목표 루프 주파수에 안정적으로 도달하기 어려웠고, 공유메모리(SPSC, zero-copy)를 사용하는 \emph{SIL 제어기}는 고주파(IMU \(\sim\!\SI{1}{kHz}\), Barometer \(\sim\!\SI{100}{Hz}\), PWM \(\SI{400}{Hz}\))에서도 안정적으로 동작하였다.
+\paragraph{측정 프로토콜}
+CAP=1 조건에서 동일 PC/월드/\(\Delta t\)로 RPC 경로와 Shared Memory(SPSC, zero-copy) 경로를 비교하였다. 각 경로에 대해 IMU, Barometer, Magnetometer, PWM의 타임스탬프(ts\_ns)로 인접 샘플 간 \(\Delta t\) 역수를 계산하였다. 그런 다음 60--120 s 구간에서 유효 주파수와 지연/지터(P50/P95), 드롭/오버라이트 비율을 구하였다. IMU는 1000 Hz에서 시작해 설정 가능한 상한까지 가속(stress 테스트)했고, Barometer/Magnetometer는 100 Hz, PWM은 400 Hz를 목표로 하였으며, 모든 실험은 동일 PC/월드/\(\Delta t\), 상향된 스레드 우선순위, Windows 타이머 분해능 1 ms, 고정된 패킷 크기 조건에서 수행하였다.
 
+\paragraph{최대속도 및 센서 대역폭 해석}
+본 비교는 각 경로의 최대 처리 주파수를 보기 위한 최대속도(stress) 테스트이다. 최대 지속 처리율이 클수록 실제 운용 주파수(IMU \(\sim\!1\,kHz\), PWM \(400\,Hz\))에서 드롭/오버라이트 없이 균일한 샘플링을 유지할 여유가 커진다. ICM42688P급 IMU는 데이터시트 상 최대 ODR이 \(\sim\!32\,kHz\)로 내부 오버샘플링 후 필터링·다운샘플링을 수행하므로, 시뮬레이터가 수 kHz--수만 Hz급 샘플링을 처리할 여유 대역폭을 갖는 것이 현실 센서 동작을 모사하는 데 유리하다. 제안된 구현에서 IMU 퍼블리셔는 최대 \(\sim\!32\,kHz\)까지 설정 가능하며, Shared Memory 경로에서는 이 범위 내에서 IMU·PWM 루프가 동시에 유지된 반면 RPC 경로에서는 IMU 속도를 올릴수록 PWM 루프가 목표 주파수(\(\SI{400}{Hz}\))에서 점차 이탈하였다. RPC는 직렬화/컨텍스트 스위칭/네트워킹 오버헤드로 인해 PWM 루프에서 목표 주파수에 안정적으로 도달하기 어렵고, Shared Memory 기반 \emph{SIL 제어기}는 IMU 및 PWM에서 더 높은 최대 처리 주파수와 여유 대역폭을 확보하였다.
 
 요약하면, RPC 경로는 직렬화·컨텍스트 스위칭·네트워킹 오버헤드로 인해 목표 주파수 달성이 어려운 반면, 공유메모리 경로는 목표 주파수를 일관되게 유지하였다. 이 결과는 제어기/필터 블록을 \emph{SIL 제어기}에서 검증 후 실제 FC에 소스 수준으로 신속 이식할 수 있음을 뒷받침한다.
 
@@ -509,7 +509,7 @@ RPC 경로는 직렬화/역직렬화와 컨텍스트 스위칭, 네트워킹 스
 \toprule
 항목 & RPC (Hz) & SHM (Hz) \\
 \midrule
-IMU & 14586 & 1000 \\
+IMU & 15,516 & 78,383 \\
 Barometer & 100.000 & 100.000 \\
 Magnetometer & 100.000 & 100.000 \\
 PWM & 340.0 & 400.0 \\
@@ -553,5 +553,4 @@ PWM & 340.0 & 400.0 \\
 \end{thebibliography}
 
 \end{document}
-
 

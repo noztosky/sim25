@@ -41,7 +41,7 @@ public:
 
         if (!xmem_inited_) {
             // init 1kHz pacing and x_xsim server mapping
-            target_hz_ = 100000.0f;
+            target_hz_ = 1000.0f;
             period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(target_hz_));
             next_write_tp_ns_ = clock()->nowNanos() + period_ns_;
             if (!xsim_) xsim_.reset(new x_xsim());

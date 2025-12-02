@@ -11,11 +11,11 @@
 #include <chrono>
 #include <thread>
 #include <atomic>
-#include "x_xsim.h"
-#include "lib/PidController.hpp"
-#include "lib/LogHelper.hpp"
-#include "lib/XSimIo.hpp"
-#include "lib/AttitudeUtils.hpp"
+#include "shm/x_xsim.h"
+#include "shm/lib/PidController.hpp"
+#include "shm/lib/LogHelper.hpp"
+#include "shm/lib/XSimIo.hpp"
+#include "shm/lib/AttitudeUtils.hpp"
 #include <cstdint>
 #include <random>
 #include "attitude_estimator.hpp"
@@ -26,8 +26,8 @@
 #include <cstdio>
 
 static const int PWM_TX_HZ = 400;
-// Debug toggles
-static constexpr bool DISABLE_BIAS     = false; // ignore per-rotor bias during tuning
+// Debug/테스트 토글 (기본값: 안전하게 비활성화)
+static constexpr bool DISABLE_BIAS     = true;  // per-rotor bias 비활성화(기본 0)
 // Pulse test (sequential rotor bump) before PID to validate mapping
 static constexpr bool ENABLE_PULSE_TEST = false;
 static constexpr int  PULSE_US          = 15;    // +us bump on selected rotor (reduced)
@@ -35,7 +35,7 @@ static constexpr int  PULSE_SLOT_MS     = 200;   // duration per rotor (reduced)
 // Slew rate limiting per 400Hz tick
 static constexpr int  SLEW_US_PER_TICK  = 10;    // max change per tick
 // Directed rotor test to validate orientation mapping (Forward, Right, Back, Left)
-static constexpr bool ENABLE_TEST_ROTORS = true;
+static constexpr bool ENABLE_TEST_ROTORS = false;
 static constexpr int  TEST_PWM_LOW  = 1000;  // suggested
 static constexpr int  TEST_PWM_HIGH = 1600;  // suggested
 static constexpr int  TEST_HOLD_MS  = 1000;  // hold per direction
