@@ -40,9 +40,11 @@ public:
         updateOutput();
 
         if (!xmem_inited_) {
-            // init 1kHz pacing and x_xsim server mapping
-            target_hz_ = 1000.0f;
-            period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(target_hz_));
+            // Synchronize SHM output period with PhysicsLoopPeriod (default 8kHz/125us)
+            long long phys_period = Settings::singleton().getInt("PhysicsLoopPeriod", 125000);
+            target_hz_ = 1e9f / phys_period;
+            period_ns_ = phys_period;
+
             next_write_tp_ns_ = clock()->nowNanos() + period_ns_;
             if (!xsim_) xsim_.reset(new x_xsim());
             xsim_->server_create("AirSimXsim");
@@ -84,7 +86,7 @@ public:
 
         updateOutput();
 
-        // publish to x_xsim at ~1 kHz (uniform pacing with cumulative schedule + skip-late)
+        // publish to x_xsim at target_hz_ (synchronized with physics by default)
         if (xmem_inited_ && target_hz_ > 0) {
             const TTimePoint now_ns = clock()->nowNanos();
             if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
@@ -118,7 +120,7 @@ public:
 
                 // emit one or more samples to catch up (capped)
                 int batch_emits = 0;
-                constexpr int kMaxBatch = 8;
+                constexpr int kMaxBatch = 500; // Increased significantly for high RTF stability
                 while (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0 && batch_emits < kMaxBatch) {
                     XSimTelemetry d; // fields set below
                     d.gyro[0] = static_cast<double>(gt.kinematics->twist.angular.x());
@@ -206,10 +208,10 @@ private:
 
     std::unique_ptr<x_xsim> xsim_;
     bool xmem_inited_ = false;
-    float target_hz_ = 100000.0f;
+    float target_hz_ = 8000.0f;
     // scheduling for consistent rate
     TTimePoint next_write_tp_ns_ = 0;
-    TTimePoint period_ns_ = 0;
+    TTimePoint period_ns_ = static_cast<TTimePoint>(1e9 / 8000.0);
     uint32_t imu_seq_ = 0;
 
     // 100 Hz throttling for BARO and MAG in SHM telemetry

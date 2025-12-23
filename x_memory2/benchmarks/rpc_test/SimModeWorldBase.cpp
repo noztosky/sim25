@@ -9,17 +9,11 @@ void ASimModeWorldBase::BeginPlay()
     Super::BeginPlay();
 }
 
-void ASimModeWorldBase::setupPhysicsLoopPeriod()
+void ASimModeWorldBase::initializeForPlay()
 {
     // Load dynamic physics period from settings.json if exists
     long long period = msr::airlib::Settings::singleton().getInt("PhysicsLoopPeriod", (int)getPhysicsLoopPeriod());
     setPhysicsLoopPeriod(period);
-}
-
-void ASimModeWorldBase::initializeForPlay()
-{
-    // Ensure physics period is loaded (should be done by setupPhysicsLoopPeriod already)
-    setupPhysicsLoopPeriod();
 
     std::vector<msr::airlib::UpdatableObject*> vehicles;
     for (auto& api : getApiProvider()->getVehicleSimApis())

@@ -1,0 +1,38 @@
+{
+  "SettingsVersion": 1.2,
+  "SimMode": "Multirotor",
+  "ViewMode": "FlyWithMe",
+  "DefaultVehicleConfig": "Drone1",
+  "Vehicles": {
+    "Drone1": {
+      "VehicleType": "SimpleFlight",
+      "AutoCreate": true,
+      "AllowAPIAlways": true,
+      "RC": {
+        "RemoteControlID": -1,
+        "AllowAPIWhenDisconnected": true
+      },
+      "Sensors": {
+        "Imu": {
+          "SensorType": 2,
+          "Enabled": true,
+          "Model": "Xsim"
+        },
+        "Barometer": {
+          "SensorType": 1,
+          "Enabled": true,
+          "Model": "Xsim"
+        }
+      }
+    }
+  },
+  "PawnPaths": {
+    "DefaultQuadrotor": {
+      "PawnBP": "Class\u0027/AirSim/Blueprints/BP_FlyingPawn.BP_FlyingPawn_C\u0027"
+    }
+  },
+  "ApiServer": {
+    "Enabled": true
+  },
+  "PhysicsLoopPeriod": 125000
+}

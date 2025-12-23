@@ -38,7 +38,6 @@ public:
 protected:
     void startAsyncUpdator();
     void stopAsyncUpdator();
-    virtual void setupPhysicsLoopPeriod() override;
     virtual void updateDebugReport(msr::airlib::StateReporterWrapper& debug_reporter) override;
 
     //should be called by derived class once all api_provider_ is ready to use
@@ -71,5 +70,5 @@ private:
     HP Z840 desktop high-end config seems to be able to go up to 500Hz.
     To increase freq with limited CPU power, switch Barometer to constant ref mode.
     */
-    long long physics_loop_period_    = 125000;    // Default 1000 Hz (1ms)
+    long long physics_loop_period_    = 1000000LL;    // Default 1000 Hz (1ms)
 };

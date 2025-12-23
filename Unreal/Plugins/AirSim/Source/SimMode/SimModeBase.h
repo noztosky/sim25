@@ -151,6 +151,8 @@ protected: //optional overrides
     void checkVehicleReady(); //checks if vehicle is available to use
     virtual void updateDebugReport(msr::airlib::StateReporterWrapper& debug_reporter);
     virtual void initializeExternalCameras();
+    //called when SimMode should handle physics loop period setting
+    virtual void setupPhysicsLoopPeriod();
 
 protected: //Utility methods for derived classes
     virtual const AirSimSettings& getSettings() const;
@@ -219,7 +221,6 @@ private:
     void initializeTimeOfDay();
     void advanceTimeOfDay();
     void setSunRotation(FRotator rotation);
-    void setupPhysicsLoopPeriod();
     void showClockStats();
     void drawLidarDebugPoints();
     void drawDistanceSensorDebugPoints();

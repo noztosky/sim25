@@ -1,0 +1,4 @@
+TargetHz,TotalSamples,Bucket_5pct,Bucket_10pct,Bucket_15pct,Bucket_20pct,Bucket_30pct,Bucket_Over30pct
+1000,9952,9952,0,0,0,0,0
+4000,39820,39818,1,0,0,0,1
+8000,79657,79645,1,1,0,3,6

@@ -67,7 +67,7 @@ namespace airlib
                 if (!xsim_) xsim_.reset(new x_xsim());
                 xsim_->client_connect("AirSimXsim");
                 pwm_reader_inited_ = true;
-                last_log_tp_ = std::chrono::steady_clock::now();
+                last_log_tp_ = clock()->nowNanos();
                 pwm_read_count_sec_ = 0;
                 // ensure API control and arming are enabled so motor PWMs take effect
                 if (!isApiControlEnabled()) enableApiControl(true);
@@ -108,8 +108,8 @@ namespace airlib
                     latest_mag_[2] = mag_out.magnetic_field_body.z();
                 }
                 // 1-second combined log (even if no new PWM in this tick)
-                auto now = std::chrono::steady_clock::now();
-                auto dt_sec = std::chrono::duration<double>(now - last_log_tp_).count();
+                auto now = clock()->nowNanos();
+                auto dt_sec = clock()->elapsedSince(last_log_tp_);
                 if (dt_sec >= 1.0) {
                     int imu_hz = XlabUeMetrics::getImuHz();
                     int imu_emit_hz = XlabUeMetrics::getImuEmitHz();
@@ -528,7 +528,7 @@ namespace airlib
         // External PWM reader (shared memory ring)
         bool pwm_reader_inited_ = false;
         std::unique_ptr<x_xsim> xsim_;
-        std::chrono::steady_clock::time_point last_log_tp_{};
+        TTimePoint last_log_tp_ = 0;
         int pwm_read_count_sec_ = 0;
         int last_pwm_r_[4] = {0, 0, 0, 0};
         // latest telemetry snapshot for combined logging

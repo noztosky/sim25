@@ -13,13 +13,9 @@
 
 #include "drivers/rpc/RPC_Driver.hpp"
 #include "modules/imu/IMU_SimRPC.hpp"
+#include "modules/attitude/ATT_Mahony.hpp"
 #include "modules/actuator/ACT_SimRPC.hpp"
 
-#include "drivers/shm/SHM_Driver.hpp"
-#include "modules/imu/IMU_SimSHM.hpp"
-#include "modules/actuator/ACT_SimSHM.hpp"
-
-#include "modules/attitude/ATT_Mahony.hpp"
 #include "core/PerfStats.hpp"
 
 #include <string>
@@ -34,25 +30,14 @@ int main(int argc, char* argv[]) {
         target_hz = std::stod(argv[1]);
     }
     
-    // --- [Option 1] RPC Mode ---
-    /*
-    printf("[SIL_App] Mode: RPC\n");
+    printf("[SIL_App] Starting RPC Test - Target IMU: %.0f Hz, PWM: 400Hz\n", target_hz);
+
     RPC_Driver driver("127.0.0.1", 41451);
     IMU_SimRPC imu(driver);
-    ACT_SimRPC act(driver);
-    auto& target_driver = driver;
-    */
-
-    // --- [Option 2] SHM Mode ---
-    printf("[SIL_App] Mode: SHM\n");
-    SHM_Driver driver("AirSimXsim");
-    IMU_SimSHM imu(driver);
-    ACT_SimSHM act(driver);
-    auto& target_driver = driver;
-
     ATT_Mahony att((float)target_hz); 
+    ACT_SimRPC act(driver);
 
-    if (!target_driver.connect()) {
+    if (!driver.connect()) {
         std::cerr << "[SIL_App] Failed to connect!" << std::endl;
         return 1;
     }
