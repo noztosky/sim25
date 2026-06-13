@@ -25,7 +25,10 @@ struct XSimTelemetry {
     double gyro[3];
     float quat[4];
     double loc_ned[3];
+    double vel_ned[3];
     double alt;
+    double pressure;
+    double temperature;
     double mag[3];
     long long timestamp;
     int seq;

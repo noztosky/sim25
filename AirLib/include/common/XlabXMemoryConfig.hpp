@@ -1,9 +1,9 @@
 #pragma once
 
 // External x_memory integration macros (ring buffer)
-// Default: use local copy at D:\open\airsim\x_memory\fc_ring.h
+// Default: use local copy under AirLib includes
 #ifndef XLAB_XMEMORY_HEADER
-#define XLAB_XMEMORY_HEADER "D:\\open\\airsim\\x_memory\\fc_ring.h"
+#define XLAB_XMEMORY_HEADER "common/fc_ring.h"
 #endif
 
 // Use fc_ring C++ class API (SPSC ring)

@@ -9,7 +9,7 @@ set "PLUGIN_XAIR=%ROOT_DIR%Unreal\Plugins\AirSim\Source\XAir"
 set "BLOCKS_PLUGIN_DIR=%PROJECT_DIR%\Plugins\AirSim"
 
 echo ===== copy pluugins ======
-robocopy "d:\open\airsim\Unreal\Plugins\AirSim\Source\Vehicles\Multirotor" "d:\open\airsim\Unreal\Environments\Blocks\Plugins\AirSim\Source\Vehicles\Multirotor" /E /COPY:DAT /R:0 /W:0 /NFL /NDL /NP /NJH /NJS
+robocopy "%ROOT_DIR%Unreal\Plugins\AirSim\Source\Vehicles\Multirotor" "%BLOCKS_PLUGIN_DIR%\Source\Vehicles\Multirotor" /E /COPY:DAT /R:0 /W:0 /NFL /NDL /NP /NJH /NJS
 
 REM Ensure x_xsim headers are available under plugin Source for relative includes
 set "XSIM_SRC=%ROOT_DIR%x_memory\shm"

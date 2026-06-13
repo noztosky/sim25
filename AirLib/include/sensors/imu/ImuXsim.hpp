@@ -76,6 +76,9 @@ public:
         last_loc_[0] = static_cast<double>(p0.x());
         last_loc_[1] = static_cast<double>(p0.y());
         last_loc_[2] = static_cast<double>(p0.z());
+        last_vel_[0] = 0.0;
+        last_vel_[1] = 0.0;
+        last_vel_[2] = 0.0;
     }
 
     virtual void update() override
@@ -100,11 +103,16 @@ public:
                     last_loc_[0] = static_cast<double>(p.x());
                     last_loc_[1] = static_cast<double>(p.y());
                     last_loc_[2] = static_cast<double>(p.z());
+                    last_vel_[0] = static_cast<double>(gt.kinematics->twist.linear.x());
+                    last_vel_[1] = static_cast<double>(gt.kinematics->twist.linear.y());
+                    last_vel_[2] = static_cast<double>(gt.kinematics->twist.linear.z());
                     next_loc_update_ns_ += loc_period_ns_;
                     ++loc_tick_cnt_;
                 }
                 if (static_cast<long long>(now_ns - next_baro_update_ns_) >= 0) {
                     last_alt_ = -static_cast<double>(p.z());
+                    last_pressure_ = 101325.0 * std::pow(1.0 - 2.25577e-5 * last_alt_, 5.25588);
+                    last_temp_ = 15.0 - 0.0065 * last_alt_;
                     next_baro_update_ns_ += baro_period_ns_;
                     ++baro_tick_cnt_;
                 }
@@ -133,7 +141,12 @@ public:
                     d.loc_ned[0] = last_loc_[0];
                     d.loc_ned[1] = last_loc_[1];
                     d.loc_ned[2] = last_loc_[2];
+                    d.vel_ned[0] = last_vel_[0];
+                    d.vel_ned[1] = last_vel_[1];
+                    d.vel_ned[2] = last_vel_[2];
                     d.alt = last_alt_;
+                    d.pressure = last_pressure_;
+                    d.temperature = last_temp_;
                     d.mag[0] = last_mag_[0];
                     d.mag[1] = last_mag_[1];
                     d.mag[2] = last_mag_[2];
@@ -222,6 +235,8 @@ private:
     TTimePoint next_baro_update_ns_ = 0;
     TTimePoint next_mag_update_ns_  = 0;
     double last_alt_ = 0.0;
+    double last_pressure_ = 101325.0;
+    double last_temp_ = 15.0;
     double last_mag_[3] = {0.0, 0.0, 0.0};
     uint32_t baro_tick_cnt_ = 0;
     uint32_t mag_tick_cnt_ = 0;
@@ -230,6 +245,7 @@ private:
     TTimePoint loc_period_ns_ = 0;
     TTimePoint next_loc_update_ns_ = 0;
     double last_loc_[3] = {0.0, 0.0, 0.0};
+    double last_vel_[3] = {0.0, 0.0, 0.0};
     uint32_t loc_tick_cnt_ = 0;
     // producer metrics
     uint32_t emit_tick_cnt_ = 0;

@@ -1,8 +1,9 @@
 @echo off
-if not exist build mkdir build
-
 :: Get absolute path to this script's directory
 set ROOT_DIR=%~dp0
+cd /d %ROOT_DIR%
+
+if not exist build mkdir build
 :: Resolve AirLib path (parent of current dir + AirLib)
 pushd %ROOT_DIR%..\AirLib
 set AIRLIB_PATH=%CD%
@@ -28,8 +29,11 @@ set CFLAGS=/EHsc /std:c++17 /MD /DNOMINMAX /I. /I"%AIRLIB_INC%" /I"%AIRLIB_PATH%
 
 :: Main Build
 echo Building SIL_App...
-echo CFLAGS=%CFLAGS%
 cl %CFLAGS% apps\SIL_App.cpp "%AIRLIB_LIB%\AirLib.lib" "%RPC_LIB%\rpc.lib" "%MAVLINK_LIB%\MavLinkCom.lib" Advapi32.lib ws2_32.lib User32.lib winmm.lib /Fe:build\SIL_App.exe /link /NODEFAULTLIB:LIBCMT
-
 if %errorlevel% neq 0 exit /b %errorlevel%
+
+echo Building SendCmd...
+cl /EHsc /std:c++17 /MD /DNOMINMAX apps\SendCmd.cpp ws2_32.lib /Fe:build\SendCmd.exe
+if %errorlevel% neq 0 exit /b %errorlevel%
+
 echo Build Success!

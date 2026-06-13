@@ -51,6 +51,10 @@ goto :eof
 :start
 chdir /d %ROOT_DIR% 
 
+REM //---------- copy fc_ring.h to AirLib include folder ----------
+if NOT exist AirLib\include\common mkdir AirLib\include\common
+copy /y x_memory\fc_ring.h AirLib\include\common\fc_ring.h
+
 REM //---------- Check cmake version ----------
 CALL check_cmake.bat
 if ERRORLEVEL 1 (
