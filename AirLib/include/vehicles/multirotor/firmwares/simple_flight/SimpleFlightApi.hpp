@@ -147,10 +147,16 @@ namespace airlib
                     double ny = have_telem_ ? last_telem_.loc_ned[1] : 0.0;
                     double nz = have_telem_ ? last_telem_.loc_ned[2] : 0.0;
                     int loc_hz = XlabUeMetrics::getLocHz();
+                    // physics/SHM sampling loop jitter (measured in ImuXsim)
+                    int loop_hz   = XlabUeMetrics::getLoopHz();
+                    int jit_mean  = XlabUeMetrics::getLoopJitMeanUs();
+                    int jit_p99   = XlabUeMetrics::getLoopJitP99Us();
+                    int jit_max   = XlabUeMetrics::getLoopJitMaxUs();
                     Utils::log(Utils::stringf(
-                        "imu: %.2f %.2f %.2f %.2f %.2f %.2f(%dHz, emit %d, overrun %d), mag: %.2f %.2f %.2f (%dHz) baro: %.2f (%dHz) loc: %.2f %.2f %.2f (%dHz) pwm: %d %d %d %d  (%dHz)",
+                        "imu: %.2f %.2f %.2f %.2f %.2f %.2f(%dHz, emit %d, overrun %d), mag: %.2f %.2f %.2f (%dHz) baro: %.2f (%dHz) loc: %.2f %.2f %.2f (%dHz) pwm: %d %d %d %d  (%dHz) | loop: %dHz jit(us) mean=%d p99=%d max=%d",
                         gx,gy,gz,ax,ay,az, imu_hz, imu_emit_hz, imu_overrun_hz, mx,my,mz, mag_hz, alt, baro_hz, nx,ny,nz, loc_hz,
-                        last_pwm_r_[0], last_pwm_r_[1], last_pwm_r_[2], last_pwm_r_[3], pwm_hz));
+                        last_pwm_r_[0], last_pwm_r_[1], last_pwm_r_[2], last_pwm_r_[3], pwm_hz,
+                        loop_hz, jit_mean, jit_p99, jit_max));
                     last_log_tp_ = now;
                     pwm_read_count_sec_ = 0;
                     prev_overrun_total = cur_overrun_total;

@@ -54,6 +54,15 @@ struct XlabUeMetrics {
     {
         return getImuSkipHzRef().load(std::memory_order_relaxed);
     }
+    // --- physics/SHM sampling loop jitter (us), measured in ImuXsim ---
+    static void setLoopHz(int hz) { getLoopHzRef().store(hz, std::memory_order_relaxed); }
+    static int  getLoopHz() { return getLoopHzRef().load(std::memory_order_relaxed); }
+    static void setLoopJitMeanUs(int us) { getLoopJitMeanRef().store(us, std::memory_order_relaxed); }
+    static int  getLoopJitMeanUs() { return getLoopJitMeanRef().load(std::memory_order_relaxed); }
+    static void setLoopJitP99Us(int us) { getLoopJitP99Ref().store(us, std::memory_order_relaxed); }
+    static int  getLoopJitP99Us() { return getLoopJitP99Ref().load(std::memory_order_relaxed); }
+    static void setLoopJitMaxUs(int us) { getLoopJitMaxRef().store(us, std::memory_order_relaxed); }
+    static int  getLoopJitMaxUs() { return getLoopJitMaxRef().load(std::memory_order_relaxed); }
 private:
     static std::atomic<int>& getImuHzRef()
     {
@@ -84,6 +93,26 @@ private:
     {
         static std::atomic<int> imu_skip_hz_i(0);
         return imu_skip_hz_i;
+    }
+    static std::atomic<int>& getLoopHzRef()
+    {
+        static std::atomic<int> loop_hz_i(0);
+        return loop_hz_i;
+    }
+    static std::atomic<int>& getLoopJitMeanRef()
+    {
+        static std::atomic<int> loop_jit_mean_i(0);
+        return loop_jit_mean_i;
+    }
+    static std::atomic<int>& getLoopJitP99Ref()
+    {
+        static std::atomic<int> loop_jit_p99_i(0);
+        return loop_jit_p99_i;
+    }
+    static std::atomic<int>& getLoopJitMaxRef()
+    {
+        static std::atomic<int> loop_jit_max_i(0);
+        return loop_jit_max_i;
     }
 };
 

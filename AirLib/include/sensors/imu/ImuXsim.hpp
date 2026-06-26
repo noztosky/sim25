@@ -9,6 +9,9 @@
 // use new x_xsim shared memory for composite telemetry
 #include "../../../../x_memory/shm/x_xsim.h"
 #include "common/XlabXMemoryAdapter.hpp"
+#include <fstream>
+#include <chrono>
+#include <cstring>
 
 namespace msr
 {
@@ -83,6 +86,10 @@ public:
 
     virtual void update() override
     {
+        // Measure REAL-TIME interval between physics-loop sensor updates (= SHM
+        // sampling cadence). This does NOT change the scheduler; it only observes it.
+        measureLoopJitter();
+
         ImuBase::update();
 
         /* yaw processing skipped for performance */
@@ -212,6 +219,87 @@ private:
         setOutput(output);
     }
 
+    // Observe the real wall-clock interval between successive sensor updates,
+    // i.e. the actual cadence at which telemetry is published to SHM. Aggregates
+    // per real second and surfaces to HUD (XlabUeMetrics) + log + CSV.
+    void measureLoopJitter()
+    {
+        using sclock = std::chrono::steady_clock;
+        const auto now_tp = sclock::now();
+        if (jit_first_) {
+            jit_first_ = false;
+            jit_last_tp_ = now_tp;
+            jit_report_tp_ = now_tp;
+            return;
+        }
+        const double dt_us = std::chrono::duration<double, std::micro>(now_tp - jit_last_tp_).count();
+        jit_last_tp_ = now_tp;
+
+        const double target_us = (period_ns_ > 0) ? static_cast<double>(period_ns_) / 1000.0 : 0.0;
+        double dev = dt_us - target_us;
+        if (dev < 0.0) dev = -dev;
+
+        ++jit_count_;
+        jit_dt_sum_us_ += dt_us;
+        if (dt_us > jit_dt_max_us_) jit_dt_max_us_ = dt_us;
+        if (dt_us < jit_dt_min_us_) jit_dt_min_us_ = dt_us;
+        jit_dev_sum_us_ += dev;
+        if (dev > jit_dev_max_us_) jit_dev_max_us_ = dev;
+        int b = static_cast<int>(dev + 0.5);
+        if (b < 0) b = 0;
+        if (b > JIT_BUCKETS) b = JIT_BUCKETS;
+        ++jit_hist_[b];
+
+        const double since_report = std::chrono::duration<double>(now_tp - jit_report_tp_).count();
+        if (since_report >= 1.0 && jit_count_ > 0) {
+            const double mean_dt = jit_dt_sum_us_ / static_cast<double>(jit_count_);
+            const double mean_dev = jit_dev_sum_us_ / static_cast<double>(jit_count_);
+            const double achieved_hz = (mean_dt > 0.0) ? 1e6 / mean_dt : 0.0;
+            // p95/p99 of deviation from the 1us-bucket histogram
+            const uint64_t t95 = static_cast<uint64_t>(0.95 * static_cast<double>(jit_count_));
+            const uint64_t t99 = static_cast<uint64_t>(0.99 * static_cast<double>(jit_count_));
+            uint64_t cum = 0; int p95 = JIT_BUCKETS, p99 = JIT_BUCKETS; bool g95 = false, g99 = false;
+            for (int i = 0; i <= JIT_BUCKETS; ++i) {
+                cum += jit_hist_[i];
+                if (!g95 && cum >= t95) { p95 = i; g95 = true; }
+                if (!g99 && cum >= t99) { p99 = i; g99 = true; break; }
+            }
+            XlabUeMetrics::setLoopHz(static_cast<int>(achieved_hz + 0.5));
+            XlabUeMetrics::setLoopJitMeanUs(static_cast<int>(mean_dev + 0.5));
+            XlabUeMetrics::setLoopJitP99Us(p99);
+            XlabUeMetrics::setLoopJitMaxUs(static_cast<int>(jit_dev_max_us_ + 0.5));
+            Utils::log(Utils::stringf(
+                "[XsimJit] target=%.0fHz achieved=%.1fHz | dt(us) mean=%.2f min=%.2f max=%.2f | jitter(us) mean=%.2f p95=%d p99=%d max=%.2f | n=%llu",
+                target_hz_, achieved_hz, mean_dt, jit_dt_min_us_, jit_dt_max_us_,
+                mean_dev, p95, p99, jit_dev_max_us_, static_cast<unsigned long long>(jit_count_)));
+            writeJitterCsv(achieved_hz, mean_dt, jit_dt_min_us_, jit_dt_max_us_, mean_dev, p95, p99, jit_dev_max_us_);
+            // reset window
+            jit_report_tp_ = now_tp;
+            jit_count_ = 0;
+            jit_dt_sum_us_ = 0.0; jit_dt_max_us_ = 0.0; jit_dt_min_us_ = 1e18;
+            jit_dev_sum_us_ = 0.0; jit_dev_max_us_ = 0.0;
+            std::memset(jit_hist_, 0, sizeof(jit_hist_));
+        }
+    }
+
+    void writeJitterCsv(double achieved_hz, double dt_mean, double dt_min, double dt_max,
+                        double jit_mean, int jit_p95, int jit_p99, double jit_max)
+    {
+        if (!jit_csv_open_) {
+            jit_csv_.open("xsim_loop_jitter.csv", std::ios::out | std::ios::trunc);
+            if (jit_csv_.is_open())
+                jit_csv_ << "target_hz,achieved_hz,dt_mean_us,dt_min_us,dt_max_us,"
+                            "jit_mean_us,jit_p95_us,jit_p99_us,jit_max_us\n";
+            jit_csv_open_ = true;
+        }
+        if (jit_csv_.is_open()) {
+            jit_csv_ << static_cast<long long>(target_hz_ + 0.5) << "," << achieved_hz << ","
+                     << dt_mean << "," << dt_min << "," << dt_max << ","
+                     << jit_mean << "," << jit_p95 << "," << jit_p99 << "," << jit_max << "\n";
+            jit_csv_.flush();
+        }
+    }
+
 private:
     TTimePoint last_time_ = 0;
     TTimePoint last_log_time_ = 0;
@@ -250,6 +338,21 @@ private:
     // producer metrics
     uint32_t emit_tick_cnt_ = 0;
     uint32_t skip_tick_cnt_ = 0;
+
+    // --- real-time loop jitter measurement (SHM sampling cadence) ---
+    static constexpr int JIT_BUCKETS = 4096; // deviation histogram, 1us buckets (0..4ms) + overflow
+    std::chrono::steady_clock::time_point jit_last_tp_{};
+    std::chrono::steady_clock::time_point jit_report_tp_{};
+    bool jit_first_ = true;
+    uint64_t jit_count_ = 0;
+    double jit_dt_sum_us_ = 0.0;
+    double jit_dt_max_us_ = 0.0;
+    double jit_dt_min_us_ = 1e18;
+    double jit_dev_sum_us_ = 0.0;
+    double jit_dev_max_us_ = 0.0;
+    uint32_t jit_hist_[JIT_BUCKETS + 1] = {0};
+    std::ofstream jit_csv_;
+    bool jit_csv_open_ = false;
 };
 
 }
