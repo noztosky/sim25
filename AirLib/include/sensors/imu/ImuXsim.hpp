@@ -12,6 +12,10 @@
 #include <fstream>
 #include <chrono>
 #include <cstring>
+#include <thread>
+#include <atomic>
+#include <vector>
+#include <algorithm>
 
 namespace msr
 {
@@ -58,6 +62,11 @@ public:
             xsim_->server_create("AirSimXsim");
             xmem_inited_ = true;
         }
+
+        // DIAGNOSTIC: launch a pure busy-wait timer probe thread (real wall-clock,
+        // NO physics read, NO SHM). Tells whether a real-time 1k/4k/8k loop holds
+        // inside the busy UE process, independent of the sim-clock RTF. One-shot.
+        startPureWaitProbe(target_hz_);
 
         // Initialize BARO/MAG 100 Hz throttling schedule and caches
         baro_target_hz_ = 100.0f;
@@ -302,6 +311,81 @@ private:
                      << dt_mean << "," << dt_min << "," << dt_max << ","
                      << jit_mean << "," << jit_p95 << "," << jit_p99 << "," << jit_max << "\n";
             jit_csv_.flush();
+        }
+    }
+
+    // DIAGNOSTIC: pure busy-wait timer probe. Launches one detached thread (once)
+    // that hits a real wall-clock deadline at target_hz using coarse-sleep + spin,
+    // with NO physics access and NO SHM. Reports achieved Hz + latency/jitter per
+    // real second to log + xsim_purewait.csv. Isolates the timer from sim-clock RTF.
+    static void startPureWaitProbe(double target_hz)
+    {
+        static std::atomic<bool> launched{ false };
+        bool expected = false;
+        if (!launched.compare_exchange_strong(expected, true)) return; // only once
+        std::thread(&ImuXsim::pureWaitProbeLoop, target_hz).detach();
+    }
+
+    static void pureWaitProbeLoop(double target_hz)
+    {
+        if (target_hz <= 0.0) target_hz = 1000.0;
+        timeBeginPeriod(1);
+        using clk = std::chrono::steady_clock;
+        const auto period = std::chrono::nanoseconds(static_cast<long long>(1e9 / target_hz));
+        auto next = clk::now() + period;
+        auto report_tp = clk::now();
+        uint64_t cnt = 0;
+        double lat_sum = 0.0, lat_max = 0.0, dev_sum = 0.0, dev_max = 0.0;
+        static constexpr int B = 4096;
+        std::vector<uint32_t> hist(B + 1, 0u);
+        std::ofstream csv("xsim_purewait.csv", std::ios::out | std::ios::trunc);
+        if (csv.is_open())
+            csv << "target_hz,achieved_hz,lat_mean_us,lat_max_us,jit_mean_us,jit_p95_us,jit_p99_us,jit_max_us\n";
+
+        for (;;) {
+            auto coarse = next - std::chrono::microseconds(1000);
+            if (coarse > clk::now())
+                std::this_thread::sleep_until(coarse);
+            while (clk::now() < next) { YieldProcessor(); }
+
+            auto w = clk::now();
+            const double lat = std::chrono::duration<double, std::micro>(w - next).count(); // signed lateness
+            const double dev = (lat < 0.0) ? -lat : lat;
+            next += period;
+            if (next < w) next = w + period;
+
+            ++cnt;
+            lat_sum += lat; if (lat > lat_max) lat_max = lat;
+            dev_sum += dev; if (dev > dev_max) dev_max = dev;
+            int b = static_cast<int>(dev + 0.5); if (b < 0) b = 0; if (b > B) b = B; ++hist[b];
+
+            if (std::chrono::duration<double>(w - report_tp).count() >= 1.0) {
+                const double since = std::chrono::duration<double>(w - report_tp).count();
+                const double achieved = cnt / since;
+                const double lat_mean = lat_sum / static_cast<double>(cnt);
+                const double dev_mean = dev_sum / static_cast<double>(cnt);
+                const uint64_t t95 = static_cast<uint64_t>(0.95 * cnt);
+                const uint64_t t99 = static_cast<uint64_t>(0.99 * cnt);
+                uint64_t cum = 0; int p95 = B, p99 = B; bool g95 = false, g99 = false;
+                for (int i = 0; i <= B; ++i) {
+                    cum += hist[i];
+                    if (!g95 && cum >= t95) { p95 = i; g95 = true; }
+                    if (!g99 && cum >= t99) { p99 = i; g99 = true; break; }
+                }
+                Utils::log(Utils::stringf(
+                    "[PureWait] target=%.0fHz achieved=%.1fHz | latency(us) mean=%.2f max=%.2f | jitter(us) mean=%.2f p95=%d p99=%d max=%.2f | n=%llu (busy-wait only, no physics/SHM)",
+                    target_hz, achieved, lat_mean, lat_max, dev_mean, p95, p99, dev_max,
+                    static_cast<unsigned long long>(cnt)));
+                if (csv.is_open()) {
+                    csv << static_cast<long long>(target_hz + 0.5) << "," << achieved << ","
+                        << lat_mean << "," << lat_max << "," << dev_mean << ","
+                        << p95 << "," << p99 << "," << dev_max << "\n";
+                    csv.flush();
+                }
+                report_tp = w; cnt = 0;
+                lat_sum = 0.0; lat_max = 0.0; dev_sum = 0.0; dev_max = 0.0;
+                std::fill(hist.begin(), hist.end(), 0u);
+            }
         }
     }
 
