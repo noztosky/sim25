@@ -43,10 +43,15 @@ public:
         updateOutput();
 
         if (!xmem_inited_) {
-            // Synchronize SHM output period with PhysicsLoopPeriod (default 8kHz/125us)
+            // SHM sampling (emit) rate is DECOUPLED from the physics rate. Physics keeps
+            // running at PhysicsLoopPeriod (e.g. 8kHz/125us); we publish the LATEST value
+            // to SHM at ShmSampleHz. Default = physics rate (backward compatible).
             long long phys_period = Settings::singleton().getInt("PhysicsLoopPeriod", 125000);
-            target_hz_ = 1e9f / phys_period;
-            period_ns_ = phys_period;
+            int default_sample_hz = static_cast<int>(1e9 / static_cast<double>(phys_period) + 0.5);
+            int sample_hz = Settings::singleton().getInt("ShmSampleHz", default_sample_hz);
+            if (sample_hz <= 0) sample_hz = default_sample_hz;
+            target_hz_ = static_cast<float>(sample_hz);
+            period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(sample_hz));
 
             next_write_tp_ns_ = clock()->nowNanos() + period_ns_;
             if (!xsim_) xsim_.reset(new x_xsim());
@@ -86,10 +91,6 @@ public:
 
     virtual void update() override
     {
-        // Measure REAL-TIME interval between physics-loop sensor updates (= SHM
-        // sampling cadence). This does NOT change the scheduler; it only observes it.
-        measureLoopJitter();
-
         ImuBase::update();
 
         /* yaw processing skipped for performance */
@@ -161,6 +162,9 @@ public:
                     d.seq = static_cast<int>(++imu_seq_);
                     d.is_valid = true;
                     if (xsim_) xsim_->publish_telem(d);
+                    // Measure REAL-TIME interval between consecutive SHM emits = the
+                    // actual sampling cadence (1k/4k/8k), reading the latest 8k value.
+                    recordEmitJitter();
                     next_write_tp_ns_ += period_ns_;
                     ++batch_emits;
                     ++emit_tick_cnt_;
@@ -219,10 +223,11 @@ private:
         setOutput(output);
     }
 
-    // Observe the real wall-clock interval between successive sensor updates,
-    // i.e. the actual cadence at which telemetry is published to SHM. Aggregates
-    // per real second and surfaces to HUD (XlabUeMetrics) + log + CSV.
-    void measureLoopJitter()
+    // Observe the real wall-clock interval between successive SHM emits, i.e. the
+    // actual sampling cadence (ShmSampleHz). target_hz_/period_ns_ are the sample
+    // rate (decoupled from physics). Aggregates per real second and surfaces to
+    // HUD (XlabUeMetrics) + log + CSV.
+    void recordEmitJitter()
     {
         using sclock = std::chrono::steady_clock;
         const auto now_tp = sclock::now();
