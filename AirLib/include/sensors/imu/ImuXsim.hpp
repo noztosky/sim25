@@ -6,16 +6,7 @@
 #include "common/VectorMath.hpp"
 #include "common/XlabUeMetrics.hpp"
 #include "common/EarthUtils.hpp"
-// use new x_xsim shared memory for composite telemetry
-#include "../../../../x_memory/shm/x_xsim.h"
-#include "common/XlabXMemoryAdapter.hpp"
-#include <fstream>
 #include <chrono>
-#include <cstring>
-#include <thread>
-#include <atomic>
-#include <vector>
-#include <algorithm>
 
 namespace msr
 {
@@ -33,181 +24,26 @@ public:
 
     virtual void resetImplementation() override
     {
+        Utils::log("ImuXsim::resetImplementation() activated!");
         last_time_ = clock()->nowNanos();
-
         last_log_time_ = clock()->nowNanos();
         update_count_ = 0;
-
-        const GroundTruth& ground_truth = getGroundTruth();
-        real_T pitch_r = 0, roll_r = 0, yaw_r = 0;
-        VectorMath::toEulerianAngle(ground_truth.kinematics->pose.orientation, pitch_r, roll_r, yaw_r);
-        last_yaw_rad_ = yaw_r;
-        yaw_changed_count_ = 0;
-
         updateOutput();
-
-        if (!xmem_inited_) {
-            // SHM sampling (emit) rate is DECOUPLED from the physics rate. Physics keeps
-            // running at PhysicsLoopPeriod (e.g. 8kHz/125us); we publish the LATEST value
-            // to SHM at ShmSampleHz. Default = physics rate (backward compatible).
-            long long phys_period = Settings::singleton().getInt("PhysicsLoopPeriod", 125000);
-            int default_sample_hz = static_cast<int>(1e9 / static_cast<double>(phys_period) + 0.5);
-            int sample_hz = Settings::singleton().getInt("ShmSampleHz", default_sample_hz);
-            if (sample_hz <= 0) sample_hz = default_sample_hz;
-            target_hz_ = static_cast<float>(sample_hz);
-            period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(sample_hz));
-
-            next_write_tp_ns_ = clock()->nowNanos() + period_ns_;
-            if (!xsim_) xsim_.reset(new x_xsim());
-            xsim_->server_create("AirSimXsim");
-            xmem_inited_ = true;
-        }
-
-        // DIAGNOSTIC: launch a pure busy-wait timer probe thread (real wall-clock,
-        // NO physics read, NO SHM). Tells whether a real-time 1k/4k/8k loop holds
-        // inside the busy UE process, independent of the sim-clock RTF. One-shot.
-        startPureWaitProbe(target_hz_);
-
-        // Initialize BARO/MAG 100 Hz throttling schedule and caches
-        baro_target_hz_ = 100.0f;
-        mag_target_hz_  = 100.0f;
-        baro_period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(baro_target_hz_));
-        mag_period_ns_  = static_cast<TTimePoint>(1e9 / static_cast<double>(mag_target_hz_));
-        const TTimePoint now_ns = clock()->nowNanos();
-        next_baro_update_ns_ = now_ns + baro_period_ns_;
-        next_mag_update_ns_  = now_ns + mag_period_ns_;
-        // prime caches
-        const auto& p0 = ground_truth.kinematics->pose.position;
-        last_alt_ = -static_cast<double>(p0.z());
-        {
-            Vector3r mag_world0 = EarthUtils::getMagField(ground_truth.environment->getState().geo_point) * 1E4f; // Tesla->Gauss
-            Vector3r mag_body0 = VectorMath::transformToBodyFrame(mag_world0, ground_truth.kinematics->pose.orientation, true);
-            last_mag_[0] = static_cast<double>(mag_body0.x());
-            last_mag_[1] = static_cast<double>(mag_body0.y());
-            last_mag_[2] = static_cast<double>(mag_body0.z());
-        }
-        // Initialize LOC 10 Hz throttling
-        loc_target_hz_ = 10.0f;
-        loc_period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(loc_target_hz_));
-        next_loc_update_ns_ = now_ns + loc_period_ns_;
-        last_loc_[0] = static_cast<double>(p0.x());
-        last_loc_[1] = static_cast<double>(p0.y());
-        last_loc_[2] = static_cast<double>(p0.z());
-        last_vel_[0] = 0.0;
-        last_vel_[1] = 0.0;
-        last_vel_[2] = 0.0;
     }
 
     virtual void update() override
     {
         ImuBase::update();
 
-        /* yaw processing skipped for performance */
-
         updateOutput();
-
-        // publish to x_xsim at target_hz_ (synchronized with physics by default)
-        if (xmem_inited_ && target_hz_ > 0) {
-            const TTimePoint now_ns = clock()->nowNanos();
-            if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
-                const auto& out = getOutput();
-                const GroundTruth& gt = getGroundTruth();
-                const auto& q = gt.kinematics->pose.orientation;
-                const auto& p = gt.kinematics->pose.position;
-
-                // update slow channels on schedule using current now_ns
-                if (static_cast<long long>(now_ns - next_loc_update_ns_) >= 0) {
-                    last_loc_[0] = static_cast<double>(p.x());
-                    last_loc_[1] = static_cast<double>(p.y());
-                    last_loc_[2] = static_cast<double>(p.z());
-                    last_vel_[0] = static_cast<double>(gt.kinematics->twist.linear.x());
-                    last_vel_[1] = static_cast<double>(gt.kinematics->twist.linear.y());
-                    last_vel_[2] = static_cast<double>(gt.kinematics->twist.linear.z());
-                    next_loc_update_ns_ += loc_period_ns_;
-                    ++loc_tick_cnt_;
-                }
-                if (static_cast<long long>(now_ns - next_baro_update_ns_) >= 0) {
-                    last_alt_ = -static_cast<double>(p.z());
-                    last_pressure_ = 101325.0 * std::pow(1.0 - 2.25577e-5 * last_alt_, 5.25588);
-                    last_temp_ = 15.0 - 0.0065 * last_alt_;
-                    next_baro_update_ns_ += baro_period_ns_;
-                    ++baro_tick_cnt_;
-                }
-                if (static_cast<long long>(now_ns - next_mag_update_ns_) >= 0) {
-                    Vector3r mag_world = EarthUtils::getMagField(gt.environment->getState().geo_point) * 1E4f; // Tesla->Gauss
-                    Vector3r mag_body = VectorMath::transformToBodyFrame(mag_world, gt.kinematics->pose.orientation, true);
-                    last_mag_[0] = static_cast<double>(mag_body.x());
-                    last_mag_[1] = static_cast<double>(mag_body.y());
-                    last_mag_[2] = static_cast<double>(mag_body.z());
-                    next_mag_update_ns_ += mag_period_ns_;
-                    ++mag_tick_cnt_;
-                }
-
-                // emit one or more samples to catch up (capped)
-                int batch_emits = 0;
-                constexpr int kMaxBatch = 500; // Increased significantly for high RTF stability
-                while (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0 && batch_emits < kMaxBatch) {
-                    XSimTelemetry d; // fields set below
-                    d.gyro[0] = static_cast<double>(gt.kinematics->twist.angular.x());
-                    d.gyro[1] = static_cast<double>(gt.kinematics->twist.angular.y());
-                    d.gyro[2] = static_cast<double>(gt.kinematics->twist.angular.z());
-                    d.acc[0] = static_cast<double>(out.linear_acceleration.x());
-                    d.acc[1] = static_cast<double>(out.linear_acceleration.y());
-                    d.acc[2] = static_cast<double>(out.linear_acceleration.z());
-                    d.quat[0] = q.w(); d.quat[1] = q.x(); d.quat[2] = q.y(); d.quat[3] = q.z();
-                    d.loc_ned[0] = last_loc_[0];
-                    d.loc_ned[1] = last_loc_[1];
-                    d.loc_ned[2] = last_loc_[2];
-                    d.vel_ned[0] = last_vel_[0];
-                    d.vel_ned[1] = last_vel_[1];
-                    d.vel_ned[2] = last_vel_[2];
-                    d.alt = last_alt_;
-                    d.pressure = last_pressure_;
-                    d.temperature = last_temp_;
-                    d.mag[0] = last_mag_[0];
-                    d.mag[1] = last_mag_[1];
-                    d.mag[2] = last_mag_[2];
-                    d.timestamp = static_cast<long long>(next_write_tp_ns_);
-                    d.seq = static_cast<int>(++imu_seq_);
-                    d.is_valid = true;
-                    if (xsim_) xsim_->publish_telem(d);
-                    // Measure REAL-TIME interval between consecutive SHM emits = the
-                    // actual sampling cadence (1k/4k/8k), reading the latest 8k value.
-                    recordEmitJitter();
-                    next_write_tp_ns_ += period_ns_;
-                    ++batch_emits;
-                    ++emit_tick_cnt_;
-                }
-                // if still behind (un-emitted scheduled samples remain), count them as skipped and resync
-                if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
-                    // number of scheduled periods overdue including the current one
-                    long long overdue = static_cast<long long>((now_ns - next_write_tp_ns_) / period_ns_) + 1;
-                    if (overdue > 0) skip_tick_cnt_ += static_cast<uint32_t>(overdue);
-                    next_write_tp_ns_ = now_ns + period_ns_;
-                }
-            }
-        }
 
         ++update_count_;
         const TTimeDelta elapsed_sec = clock()->elapsedSince(last_log_time_);
         if (elapsed_sec >= 1.0) {
             const double hz = static_cast<double>(update_count_) / static_cast<double>(elapsed_sec);
             XlabUeMetrics::setImuHz(static_cast<int>(hz + 0.5));
-            const double baro_hz = static_cast<double>(baro_tick_cnt_) / static_cast<double>(elapsed_sec);
-            XlabUeMetrics::setBaroHz(static_cast<int>(baro_hz + 0.5));
-            const double mag_hz = static_cast<double>(mag_tick_cnt_) / static_cast<double>(elapsed_sec);
-            XlabUeMetrics::setMagHz(static_cast<int>(mag_hz + 0.5));
-            const double loc_hz = static_cast<double>(loc_tick_cnt_) / static_cast<double>(elapsed_sec);
-            XlabUeMetrics::setLocHz(static_cast<int>(loc_hz + 0.5));
-            const double emit_hz = static_cast<double>(emit_tick_cnt_) / static_cast<double>(elapsed_sec);
-            XlabUeMetrics::setImuEmitHz(static_cast<int>(emit_hz + 0.5));
-            const double skip_hz = static_cast<double>(skip_tick_cnt_) / static_cast<double>(elapsed_sec);
-            XlabUeMetrics::setImuSkipHz(static_cast<int>(skip_hz + 0.5));
-            // keep counters but suppress per-line IMU log to avoid duplicate lines; PWM logger prints combined line
             last_log_time_ = clock()->nowNanos();
             update_count_ = 0;
-            baro_tick_cnt_ = 0; mag_tick_cnt_ = 0; loc_tick_cnt_ = 0; emit_tick_cnt_ = 0; skip_tick_cnt_ = 0;
-            yaw_changed_count_ = 0;
         }
     }
 
@@ -232,216 +68,10 @@ private:
         setOutput(output);
     }
 
-    // Observe the real wall-clock interval between successive SHM emits, i.e. the
-    // actual sampling cadence (ShmSampleHz). target_hz_/period_ns_ are the sample
-    // rate (decoupled from physics). Aggregates per real second and surfaces to
-    // HUD (XlabUeMetrics) + log + CSV.
-    void recordEmitJitter()
-    {
-        using sclock = std::chrono::steady_clock;
-        const auto now_tp = sclock::now();
-        if (jit_first_) {
-            jit_first_ = false;
-            jit_last_tp_ = now_tp;
-            jit_report_tp_ = now_tp;
-            return;
-        }
-        const double dt_us = std::chrono::duration<double, std::micro>(now_tp - jit_last_tp_).count();
-        jit_last_tp_ = now_tp;
-
-        const double target_us = (period_ns_ > 0) ? static_cast<double>(period_ns_) / 1000.0 : 0.0;
-        double dev = dt_us - target_us;
-        if (dev < 0.0) dev = -dev;
-
-        ++jit_count_;
-        jit_dt_sum_us_ += dt_us;
-        if (dt_us > jit_dt_max_us_) jit_dt_max_us_ = dt_us;
-        if (dt_us < jit_dt_min_us_) jit_dt_min_us_ = dt_us;
-        jit_dev_sum_us_ += dev;
-        if (dev > jit_dev_max_us_) jit_dev_max_us_ = dev;
-        int b = static_cast<int>(dev + 0.5);
-        if (b < 0) b = 0;
-        if (b > JIT_BUCKETS) b = JIT_BUCKETS;
-        ++jit_hist_[b];
-
-        const double since_report = std::chrono::duration<double>(now_tp - jit_report_tp_).count();
-        if (since_report >= 1.0 && jit_count_ > 0) {
-            const double mean_dt = jit_dt_sum_us_ / static_cast<double>(jit_count_);
-            const double mean_dev = jit_dev_sum_us_ / static_cast<double>(jit_count_);
-            const double achieved_hz = (mean_dt > 0.0) ? 1e6 / mean_dt : 0.0;
-            // p95/p99 of deviation from the 1us-bucket histogram
-            const uint64_t t95 = static_cast<uint64_t>(0.95 * static_cast<double>(jit_count_));
-            const uint64_t t99 = static_cast<uint64_t>(0.99 * static_cast<double>(jit_count_));
-            uint64_t cum = 0; int p95 = JIT_BUCKETS, p99 = JIT_BUCKETS; bool g95 = false, g99 = false;
-            for (int i = 0; i <= JIT_BUCKETS; ++i) {
-                cum += jit_hist_[i];
-                if (!g95 && cum >= t95) { p95 = i; g95 = true; }
-                if (!g99 && cum >= t99) { p99 = i; g99 = true; break; }
-            }
-            XlabUeMetrics::setLoopHz(static_cast<int>(achieved_hz + 0.5));
-            XlabUeMetrics::setLoopJitMeanUs(static_cast<int>(mean_dev + 0.5));
-            XlabUeMetrics::setLoopJitP99Us(p99);
-            XlabUeMetrics::setLoopJitMaxUs(static_cast<int>(jit_dev_max_us_ + 0.5));
-            Utils::log(Utils::stringf(
-                "[XsimJit] target=%.0fHz achieved=%.1fHz | dt(us) mean=%.2f min=%.2f max=%.2f | jitter(us) mean=%.2f p95=%d p99=%d max=%.2f | n=%llu",
-                target_hz_, achieved_hz, mean_dt, jit_dt_min_us_, jit_dt_max_us_,
-                mean_dev, p95, p99, jit_dev_max_us_, static_cast<unsigned long long>(jit_count_)));
-            writeJitterCsv(achieved_hz, mean_dt, jit_dt_min_us_, jit_dt_max_us_, mean_dev, p95, p99, jit_dev_max_us_);
-            // reset window
-            jit_report_tp_ = now_tp;
-            jit_count_ = 0;
-            jit_dt_sum_us_ = 0.0; jit_dt_max_us_ = 0.0; jit_dt_min_us_ = 1e18;
-            jit_dev_sum_us_ = 0.0; jit_dev_max_us_ = 0.0;
-            std::memset(jit_hist_, 0, sizeof(jit_hist_));
-        }
-    }
-
-    void writeJitterCsv(double achieved_hz, double dt_mean, double dt_min, double dt_max,
-                        double jit_mean, int jit_p95, int jit_p99, double jit_max)
-    {
-        if (!jit_csv_open_) {
-            jit_csv_.open("xsim_loop_jitter.csv", std::ios::out | std::ios::trunc);
-            if (jit_csv_.is_open())
-                jit_csv_ << "target_hz,achieved_hz,dt_mean_us,dt_min_us,dt_max_us,"
-                            "jit_mean_us,jit_p95_us,jit_p99_us,jit_max_us\n";
-            jit_csv_open_ = true;
-        }
-        if (jit_csv_.is_open()) {
-            jit_csv_ << static_cast<long long>(target_hz_ + 0.5) << "," << achieved_hz << ","
-                     << dt_mean << "," << dt_min << "," << dt_max << ","
-                     << jit_mean << "," << jit_p95 << "," << jit_p99 << "," << jit_max << "\n";
-            jit_csv_.flush();
-        }
-    }
-
-    // DIAGNOSTIC: pure busy-wait timer probe. Launches one detached thread (once)
-    // that hits a real wall-clock deadline at target_hz using coarse-sleep + spin,
-    // with NO physics access and NO SHM. Reports achieved Hz + latency/jitter per
-    // real second to log + xsim_purewait.csv. Isolates the timer from sim-clock RTF.
-    static void startPureWaitProbe(double target_hz)
-    {
-        static std::atomic<bool> launched{ false };
-        bool expected = false;
-        if (!launched.compare_exchange_strong(expected, true)) return; // only once
-        std::thread(&ImuXsim::pureWaitProbeLoop, target_hz).detach();
-    }
-
-    static void pureWaitProbeLoop(double target_hz)
-    {
-        if (target_hz <= 0.0) target_hz = 1000.0;
-        timeBeginPeriod(1);
-        using clk = std::chrono::steady_clock;
-        const auto period = std::chrono::nanoseconds(static_cast<long long>(1e9 / target_hz));
-        auto next = clk::now() + period;
-        auto report_tp = clk::now();
-        uint64_t cnt = 0;
-        double lat_sum = 0.0, lat_max = 0.0, dev_sum = 0.0, dev_max = 0.0;
-        static constexpr int B = 4096;
-        std::vector<uint32_t> hist(B + 1, 0u);
-        std::ofstream csv("xsim_purewait.csv", std::ios::out | std::ios::trunc);
-        if (csv.is_open())
-            csv << "target_hz,achieved_hz,lat_mean_us,lat_max_us,jit_mean_us,jit_p95_us,jit_p99_us,jit_max_us\n";
-
-        for (;;) {
-            auto coarse = next - std::chrono::microseconds(1000);
-            if (coarse > clk::now())
-                std::this_thread::sleep_until(coarse);
-            while (clk::now() < next) { YieldProcessor(); }
-
-            auto w = clk::now();
-            const double lat = std::chrono::duration<double, std::micro>(w - next).count(); // signed lateness
-            const double dev = (lat < 0.0) ? -lat : lat;
-            next += period;
-            if (next < w) next = w + period;
-
-            ++cnt;
-            lat_sum += lat; if (lat > lat_max) lat_max = lat;
-            dev_sum += dev; if (dev > dev_max) dev_max = dev;
-            int b = static_cast<int>(dev + 0.5); if (b < 0) b = 0; if (b > B) b = B; ++hist[b];
-
-            if (std::chrono::duration<double>(w - report_tp).count() >= 1.0) {
-                const double since = std::chrono::duration<double>(w - report_tp).count();
-                const double achieved = cnt / since;
-                const double lat_mean = lat_sum / static_cast<double>(cnt);
-                const double dev_mean = dev_sum / static_cast<double>(cnt);
-                const uint64_t t95 = static_cast<uint64_t>(0.95 * cnt);
-                const uint64_t t99 = static_cast<uint64_t>(0.99 * cnt);
-                uint64_t cum = 0; int p95 = B, p99 = B; bool g95 = false, g99 = false;
-                for (int i = 0; i <= B; ++i) {
-                    cum += hist[i];
-                    if (!g95 && cum >= t95) { p95 = i; g95 = true; }
-                    if (!g99 && cum >= t99) { p99 = i; g99 = true; break; }
-                }
-                Utils::log(Utils::stringf(
-                    "[PureWait] target=%.0fHz achieved=%.1fHz | latency(us) mean=%.2f max=%.2f | jitter(us) mean=%.2f p95=%d p99=%d max=%.2f | n=%llu (busy-wait only, no physics/SHM)",
-                    target_hz, achieved, lat_mean, lat_max, dev_mean, p95, p99, dev_max,
-                    static_cast<unsigned long long>(cnt)));
-                if (csv.is_open()) {
-                    csv << static_cast<long long>(target_hz + 0.5) << "," << achieved << ","
-                        << lat_mean << "," << lat_max << "," << dev_mean << ","
-                        << p95 << "," << p99 << "," << dev_max << "\n";
-                    csv.flush();
-                }
-                report_tp = w; cnt = 0;
-                lat_sum = 0.0; lat_max = 0.0; dev_sum = 0.0; dev_max = 0.0;
-                std::fill(hist.begin(), hist.end(), 0u);
-            }
-        }
-    }
-
 private:
     TTimePoint last_time_ = 0;
     TTimePoint last_log_time_ = 0;
     uint32_t update_count_ = 0;
-    uint32_t yaw_changed_count_ = 0;
-    real_T last_yaw_rad_ = 0;
-
-    std::unique_ptr<x_xsim> xsim_;
-    bool xmem_inited_ = false;
-    float target_hz_ = 8000.0f;
-    // scheduling for consistent rate
-    TTimePoint next_write_tp_ns_ = 0;
-    TTimePoint period_ns_ = static_cast<TTimePoint>(1e9 / 8000.0);
-    uint32_t imu_seq_ = 0;
-
-    // 100 Hz throttling for BARO and MAG in SHM telemetry
-    float baro_target_hz_ = 100.0f;
-    float mag_target_hz_  = 100.0f;
-    TTimePoint baro_period_ns_ = 0;
-    TTimePoint mag_period_ns_  = 0;
-    TTimePoint next_baro_update_ns_ = 0;
-    TTimePoint next_mag_update_ns_  = 0;
-    double last_alt_ = 0.0;
-    double last_pressure_ = 101325.0;
-    double last_temp_ = 15.0;
-    double last_mag_[3] = {0.0, 0.0, 0.0};
-    uint32_t baro_tick_cnt_ = 0;
-    uint32_t mag_tick_cnt_ = 0;
-    // LOC throttling state (10 Hz)
-    float loc_target_hz_ = 10.0f;
-    TTimePoint loc_period_ns_ = 0;
-    TTimePoint next_loc_update_ns_ = 0;
-    double last_loc_[3] = {0.0, 0.0, 0.0};
-    double last_vel_[3] = {0.0, 0.0, 0.0};
-    uint32_t loc_tick_cnt_ = 0;
-    // producer metrics
-    uint32_t emit_tick_cnt_ = 0;
-    uint32_t skip_tick_cnt_ = 0;
-
-    // --- real-time loop jitter measurement (SHM sampling cadence) ---
-    static constexpr int JIT_BUCKETS = 4096; // deviation histogram, 1us buckets (0..4ms) + overflow
-    std::chrono::steady_clock::time_point jit_last_tp_{};
-    std::chrono::steady_clock::time_point jit_report_tp_{};
-    bool jit_first_ = true;
-    uint64_t jit_count_ = 0;
-    double jit_dt_sum_us_ = 0.0;
-    double jit_dt_max_us_ = 0.0;
-    double jit_dt_min_us_ = 1e18;
-    double jit_dev_sum_us_ = 0.0;
-    double jit_dev_max_us_ = 0.0;
-    uint32_t jit_hist_[JIT_BUCKETS + 1] = {0};
-    std::ofstream jit_csv_;
-    bool jit_csv_open_ = false;
 };
 
 }

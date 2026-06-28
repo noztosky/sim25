@@ -12,6 +12,16 @@
 #include <memory>
 #include "common/CommonStructs.hpp"
 #include "common/SteppableClock.hpp"
+#include "common/Settings.hpp"
+#include "common/EarthUtils.hpp"
+#include "common/VectorMath.hpp"
+#include "common/XlabUeMetrics.hpp"
+#include "../common/XlabXMemoryAdapter.hpp"
+#include "../../../x_memory/shm/x_xsim.h"
+#include <direct.h>
+#include <fstream>
+#include <chrono>
+#include <memory>
 #include <cinttypes>
 
 namespace msr
@@ -26,6 +36,21 @@ namespace airlib
             : enable_ground_lock_(enable_ground_lock), wind_(wind)
         {
             setName("FastPhysicsEngine");
+
+            long long phys_period = Settings::singleton().getInt("PhysicsLoopPeriod", 125000); // 8000Hz default
+            int default_sample_hz = static_cast<int>(1e9 / static_cast<double>(phys_period) + 0.5);
+            target_hz_ = static_cast<float>(Settings::singleton().getInt("ShmSampleHz", default_sample_hz));
+            period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(target_hz_) + 0.5);
+
+            if (!xmem_inited_) {
+                xsim_ = std::make_unique<x_xsim>();
+                if (xsim_->server_create("AirSimXsim")) {
+                    xmem_inited_ = true;
+                    Utils::log("FastPhysicsEngine: SHM server created successfully.");
+                } else {
+                    Utils::log("FastPhysicsEngine: Failed to create SHM server.");
+                }
+            }
         }
 
         //*** Start: UpdatableState implementation ***//
@@ -107,6 +132,10 @@ namespace airlib
             body.setWrench(next_wrench);
             body.updateKinematics(next);
             body.unlock();
+
+            if (xmem_inited_ && target_hz_ > 0) {
+                publishToShm(body, clock()->nowNanos());
+            }
 
             //TODO: this is now being done in PawnSimApi::update. We need to re-think this sequence
             //with below commented out - Arducopter GPS may not work.
@@ -450,6 +479,196 @@ namespace airlib
         }
 
     private:
+        void publishToShm(PhysicsBody& body, TTimePoint now_ns)
+        {
+            // physics update counter
+            ++phys_update_cnt_;
+
+            // aggregate statistics and update HUD metrics every real second
+            const TTimeDelta elapsed_sec = clock()->elapsedSince(last_log_time_);
+            if (elapsed_sec >= 1.0) {
+                const double phys_hz = static_cast<double>(phys_update_cnt_) / static_cast<double>(elapsed_sec);
+                XlabUeMetrics::setLoopHz(static_cast<int>(phys_hz + 0.5));
+
+                const double emit_hz = static_cast<double>(emit_tick_cnt_) / static_cast<double>(elapsed_sec);
+                XlabUeMetrics::setImuEmitHz(static_cast<int>(emit_hz + 0.5));
+
+                const double skip_hz = static_cast<double>(skip_tick_cnt_) / static_cast<double>(elapsed_sec);
+                XlabUeMetrics::setImuSkipHz(static_cast<int>(skip_hz + 0.5));
+
+                last_log_time_ = clock()->nowNanos();
+                phys_update_cnt_ = 0;
+                emit_tick_cnt_ = 0;
+                skip_tick_cnt_ = 0;
+            }
+
+            if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
+                const Kinematics::State& state = body.getKinematics();
+                const Wrench& wrench = body.getWrench();
+                const Environment& env = body.getEnvironment();
+
+                int batch_emits = 0;
+                constexpr int kMaxBatch = 500;
+                while (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0 && batch_emits < kMaxBatch) {
+                    XSimTelemetry d;
+
+                    // compute IMU acceleration (gravity excluded)
+                    Vector3r gravity = env.getState().gravity;
+                    Vector3r lin_acc = state.accelerations.linear - gravity;
+
+                    // transform to body frame
+                    Vector3r acc_body = VectorMath::transformToBodyFrame(lin_acc, state.pose.orientation, true);
+                    Vector3r gyro_body = state.twist.angular;
+
+                    d.gyro[0] = static_cast<double>(gyro_body.x());
+                    d.gyro[1] = static_cast<double>(gyro_body.y());
+                    d.gyro[2] = static_cast<double>(gyro_body.z());
+
+                    d.acc[0] = static_cast<double>(acc_body.x());
+                    d.acc[1] = static_cast<double>(acc_body.y());
+                    d.acc[2] = static_cast<double>(acc_body.z());
+
+                    const auto& q = state.pose.orientation;
+                    d.quat[0] = q.w(); d.quat[1] = q.x(); d.quat[2] = q.y(); d.quat[3] = q.z();
+
+                    d.loc_ned[0] = static_cast<double>(state.pose.position.x());
+                    d.loc_ned[1] = static_cast<double>(state.pose.position.y());
+                    d.loc_ned[2] = static_cast<double>(state.pose.position.z());
+
+                    d.vel_ned[0] = static_cast<double>(state.twist.linear.x());
+                    d.vel_ned[1] = static_cast<double>(state.twist.linear.y());
+                    d.vel_ned[2] = static_cast<double>(state.twist.linear.z());
+
+                    d.alt = -d.loc_ned[2];
+                    d.pressure = 101325.0 * std::pow(1.0 - 2.25577e-5 * d.alt, 5.25588);
+                    d.temperature = 15.0 - 0.0065 * d.alt;
+
+                    Vector3r mag_world = EarthUtils::getMagField(env.getState().geo_point) * 1E4f;
+                    Vector3r mag_body = VectorMath::transformToBodyFrame(mag_world, q, true);
+                    d.mag[0] = static_cast<double>(mag_body.x());
+                    d.mag[1] = static_cast<double>(mag_body.y());
+                    d.mag[2] = static_cast<double>(mag_body.z());
+
+                    d.timestamp = static_cast<long long>(next_write_tp_ns_);
+                    d.seq = static_cast<int>(++imu_seq_);
+                    d.is_valid = true;
+
+                    // Commented out to test raw physics loop speed
+                    // if (xsim_) xsim_->publish_telem(d);
+
+                    recordEmitJitter();
+
+                    next_write_tp_ns_ += period_ns_;
+                    ++batch_emits;
+                    ++emit_tick_cnt_;
+                }
+
+                if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
+                    long long overdue = static_cast<long long>((now_ns - next_write_tp_ns_) / period_ns_) + 1;
+                    if (overdue > 0) skip_tick_cnt_ += static_cast<uint32_t>(overdue);
+                    next_write_tp_ns_ = now_ns + period_ns_;
+                }
+            }
+        }
+
+        void recordEmitJitter()
+        {
+            using sclock = std::chrono::steady_clock;
+            const auto now_tp = sclock::now();
+            if (jit_first_) {
+                jit_first_ = false;
+                jit_last_tp_ = now_tp;
+                jit_report_tp_ = now_tp;
+                return;
+            }
+            const double dt_us = std::chrono::duration<double, std::micro>(now_tp - jit_last_tp_).count();
+            jit_last_tp_ = now_tp;
+
+            const double target_us = (period_ns_ > 0) ? static_cast<double>(period_ns_) / 1000.0 : 0.0;
+            double dev = dt_us - target_us;
+            if (dev < 0.0) dev = -dev;
+
+            ++jit_count_;
+            jit_dt_sum_us_ += dt_us;
+            if (dt_us > jit_dt_max_us_) jit_dt_max_us_ = dt_us;
+            if (dt_us < jit_dt_min_us_) jit_dt_min_us_ = dt_us;
+            jit_dev_sum_us_ += dev;
+            if (dev > jit_dev_max_us_) jit_dev_max_us_ = dev;
+            int b = static_cast<int>(dev + 0.5);
+            if (b < 0) b = 0;
+            if (b > JIT_BUCKETS) b = JIT_BUCKETS;
+            ++jit_hist_[b];
+
+            const double since_report = std::chrono::duration<double>(now_tp - jit_report_tp_).count();
+            if (since_report >= 1.0 && jit_count_ > 0) {
+                const double mean_dt = jit_dt_sum_us_ / static_cast<double>(jit_count_);
+                const double mean_dev = jit_dev_sum_us_ / static_cast<double>(jit_count_);
+                const double achieved_hz = (mean_dt > 0.0) ? 1e6 / mean_dt : 0.0;
+
+                const uint64_t t95 = static_cast<uint64_t>(0.95 * static_cast<double>(jit_count_));
+                const uint64_t t99 = static_cast<uint64_t>(0.99 * static_cast<double>(jit_count_));
+                uint64_t cum = 0; int p95 = JIT_BUCKETS, p99 = JIT_BUCKETS; bool g95 = false, g99 = false;
+                for (int i = 0; i <= JIT_BUCKETS; ++i) {
+                    cum += jit_hist_[i];
+                    if (!g95 && cum >= t95) { p95 = i; g95 = true; }
+                    if (!g99 && cum >= t99) { p99 = i; g99 = true; break; }
+                }
+
+                XlabUeMetrics::setLoopJitMeanUs(static_cast<int>(mean_dev + 0.5));
+                XlabUeMetrics::setLoopJitP99Us(p99);
+                XlabUeMetrics::setLoopJitMaxUs(static_cast<int>(jit_dev_max_us_ + 0.5));
+
+                Utils::log(Utils::stringf(
+                    "[XsimJit] target=%.0fHz achieved=%.1fHz | dt(us) mean=%.2f min=%.2f max=%.2f | jitter(us) mean=%.2f p95=%d p99=%d max=%.2f | n=%llu",
+                    target_hz_, achieved_hz, mean_dt, jit_dt_min_us_, jit_dt_max_us_,
+                    mean_dev, p95, p99, jit_dev_max_us_, static_cast<unsigned long long>(jit_count_)));
+                try {
+                    _mkdir("D:/xlab/sim25/logs");
+                    _mkdir("D:/xlab/sim25/logs/airsim");
+                    std::string log_dir = "D:/xlab/sim25/logs/airsim";
+                    std::ofstream log_f(log_dir + "/xsim_jitter.log", std::ios::out | std::ios::app);
+                    if (log_f.is_open()) {
+                        log_f << Utils::stringf(
+                            "[XsimJit] target=%.0fHz achieved=%.1fHz | dt(us) mean=%.2f min=%.2f max=%.2f | jitter(us) mean=%.2f p95=%d p99=%d max=%.2f | n=%llu\n",
+                            target_hz_, achieved_hz, mean_dt, jit_dt_min_us_, jit_dt_max_us_,
+                            mean_dev, p95, p99, jit_dev_max_us_, static_cast<unsigned long long>(jit_count_));
+                    } else {
+                        Utils::log("FastPhysicsEngine failed to open log file for writing.");
+                    }
+                } catch (const std::exception& ex) {
+                    Utils::log("FastPhysicsEngine exception: " + std::string(ex.what()));
+                } catch (...) {
+                    Utils::log("FastPhysicsEngine unknown exception.");
+                }
+                writeJitterCsv(achieved_hz, mean_dt, jit_dt_min_us_, jit_dt_max_us_, mean_dev, p95, p99, jit_dev_max_us_);
+
+                jit_report_tp_ = now_tp;
+                jit_count_ = 0;
+                jit_dt_sum_us_ = 0.0; jit_dt_max_us_ = 0.0; jit_dt_min_us_ = 1e18;
+                jit_dev_sum_us_ = 0.0; jit_dev_max_us_ = 0.0;
+                std::memset(jit_hist_, 0, sizeof(jit_hist_));
+            }
+        }
+
+        void writeJitterCsv(double achieved_hz, double dt_mean, double dt_min, double dt_max,
+                            double jit_mean, int jit_p95, int jit_p99, double jit_max)
+        {
+            if (!jit_csv_open_) {
+                jit_csv_.open("xsim_loop_jitter.csv", std::ios::out | std::ios::trunc);
+                if (jit_csv_.is_open())
+                    jit_csv_ << "target_hz,achieved_hz,dt_mean_us,dt_min_us,dt_max_us,"
+                                "jit_mean_us,jit_p95_us,jit_p99_us,jit_max_us\n";
+                jit_csv_open_ = true;
+            }
+            if (jit_csv_.is_open()) {
+                jit_csv_ << static_cast<long long>(target_hz_ + 0.5) << "," << achieved_hz << ","
+                         << dt_mean << "," << dt_min << "," << dt_max << ","
+                         << jit_mean << "," << jit_p95 << "," << jit_p99 << "," << jit_max << "\n";
+                jit_csv_.flush();
+            }
+        }
+
+    private:
         static constexpr uint kCollisionResponseCycles = 1;
         static constexpr float kAxisTolerance = 0.25f;
         static constexpr float kRestingVelocityMax = 0.1f;
@@ -459,6 +678,35 @@ namespace airlib
         bool enable_ground_lock_;
         TTimePoint last_message_time;
         Vector3r wind_;
+
+        // SHM composite variables
+        std::unique_ptr<x_xsim> xsim_;
+        bool xmem_inited_ = false;
+        float target_hz_ = 1000.0f;
+        TTimePoint next_write_tp_ns_ = 0;
+        TTimePoint period_ns_ = 1000000;
+        uint32_t imu_seq_ = 0;
+
+        // Statistics
+        TTimePoint last_log_time_ = 0;
+        uint32_t emit_tick_cnt_ = 0;
+        uint32_t skip_tick_cnt_ = 0;
+        uint32_t phys_update_cnt_ = 0;
+
+        // Jitter measurement
+        static constexpr int JIT_BUCKETS = 4096;
+        std::chrono::steady_clock::time_point jit_last_tp_{};
+        std::chrono::steady_clock::time_point jit_report_tp_{};
+        bool jit_first_ = true;
+        uint64_t jit_count_ = 0;
+        double jit_dt_sum_us_ = 0.0;
+        double jit_dt_max_us_ = 0.0;
+        double jit_dt_min_us_ = 1e18;
+        double jit_dev_sum_us_ = 0.0;
+        double jit_dev_max_us_ = 0.0;
+        uint32_t jit_hist_[JIT_BUCKETS + 1] = {0};
+        std::ofstream jit_csv_;
+        bool jit_csv_open_ = false;
     };
 }
 } //namespace

@@ -1,6 +1,22 @@
 @echo off
 setlocal
 
+if "%1"=="--no-log-wrap" goto :Main
+
+set "LOG_DIR=%~dp0logs\build"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+
+set "TIMESTAMP=%date:~0,4%%date:~5,2%%date:~8,2%_%time:~0,2%%time:~3,2%%time:~6,2%"
+set "TIMESTAMP=%TIMESTAMP: =0%"
+set "LOG_FILE=%LOG_DIR%\buildue_%TIMESTAMP%.log"
+
+echo Logging buildue to %LOG_FILE%
+powershell -NoProfile -Command "& '%~f0' --no-log-wrap 2>&1 | Tee-Object -FilePath '%LOG_FILE%'"
+exit /b %errorlevel%
+
+:Main
+shift
+
 REM ===== AirSim UE build (Blocks) =====
 set "ROOT_DIR=%~dp0"
 set "PROJECT_DIR=%ROOT_DIR%Unreal\Environments\Blocks"
@@ -39,7 +55,9 @@ if /I "%IS_JUNCTION%"=="1" (
 ) else (
     if exist "%PROJECT_DIR%\update_from_git.bat" (
         echo Sync AirSim plugin source -> Blocks project ...
-        call "%PROJECT_DIR%\update_from_git.bat" "%ROOT_DIR%"
+        set "SAFE_ROOT=%ROOT_DIR%"
+        if "!SAFE_ROOT:~-1!"=="\" set "SAFE_ROOT=!SAFE_ROOT:~0,-1!"
+        call "%PROJECT_DIR%\update_from_git.bat" "!SAFE_ROOT!"
     ) else (
         echo WARNING: update_from_git.bat not found in %PROJECT_DIR%
     )

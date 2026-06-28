@@ -8,7 +8,14 @@
 #include "Vehicles/ComputerVision/SimModeComputerVision.h"
 
 #include "common/AirSimSettings.hpp"
+#include "Engine/Canvas.h"
+#include "Engine/Engine.h"
+#include "common/XlabUeMetrics.hpp"
 #include <stdexcept>
+
+#ifdef DrawText
+#undef DrawText
+#endif
 
 ASimHUD::ASimHUD()
 {
@@ -399,4 +406,41 @@ bool ASimHUD::readSettingsTextFromFile(const FString& settingsFilepath, std::str
     }
 
     return found;
+}
+
+void ASimHUD::DrawHUD()
+{
+    Super::DrawHUD();
+
+    if (!Canvas) return;
+
+    // 1. 현재시각 포맷팅 (00:00.00 형식)
+    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    int32 Minutes = FMath::FloorToInt(CurrentTime / 60.0f);
+    int32 Seconds = FMath::FloorToInt(CurrentTime) % 60;
+    int32 Centiseconds = FMath::FloorToInt((CurrentTime - FMath::FloorToFloat(CurrentTime)) * 100.0f);
+
+    FString TimeStr = FString::Printf(TEXT("현재시각: %02d:%02d.%02d"), Minutes, Seconds, Centiseconds);
+
+    // 2. 물리엔진 및 IMU Hz 획득
+    int32 ImuHz = msr::airlib::XlabUeMetrics::getImuHz();
+    int32 LoopHz = msr::airlib::XlabUeMetrics::getLoopHz();
+
+    FString PhysicsStr = FString::Printf(TEXT("물리 엔진: %d Hz"), LoopHz);
+    FString ImuStr = FString::Printf(TEXT("IMU: %d Hz"), ImuHz);
+
+    // 폰트 설정
+    UFont* DebugFont = GEngine->GetMediumFont();
+    if (!DebugFont) DebugFont = GEngine->GetSmallFont();
+
+    // 화면 우상단에 우측 정렬 느낌으로 배치
+    float X = Canvas->SizeX - 250.0f;
+    float Y = 20.0f;
+
+    FLinearColor TextColor = FLinearColor::Green;
+
+    // 텍스트 그리기
+    DrawText(TimeStr, TextColor, X, Y, DebugFont, 1.2f, false);
+    DrawText(PhysicsStr, TextColor, X, Y + 25.0f, DebugFont, 1.2f, false);
+    DrawText(ImuStr, TextColor, X, Y + 50.0f, DebugFont, 1.2f, false);
 }
