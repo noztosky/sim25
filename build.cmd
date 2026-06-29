@@ -3,6 +3,22 @@ REM //---------- set up variable ----------
 setlocal
 set ROOT_DIR=%~dp0
 
+if "%1"=="--no-log-wrap" goto :MainLogWrap
+
+set "LOG_DIR=%~dp0logs\build"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+
+set "TIMESTAMP=%date:~0,4%%date:~5,2%%date:~8,2%_%time:~0,2%%time:~3,2%%time:~6,2%"
+set "TIMESTAMP=%TIMESTAMP: =0%"
+set "LOG_FILE=%LOG_DIR%\build_%TIMESTAMP%.log"
+
+echo Logging build to %LOG_FILE%
+powershell -NoProfile -Command "& '%~f0' --no-log-wrap %* 2>&1 | Tee-Object -FilePath '%LOG_FILE%'"
+exit /b %errorlevel%
+
+:MainLogWrap
+shift
+
 REM // Check command line arguments
 set "noFullPolyCar="
 set "buildMode="

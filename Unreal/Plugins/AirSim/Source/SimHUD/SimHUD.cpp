@@ -422,12 +422,11 @@ void ASimHUD::DrawHUD()
 
     FString TimeStr = FString::Printf(TEXT("현재시각: %02d:%02d.%02d"), Minutes, Seconds, Centiseconds);
 
-    // 2. 물리엔진 및 IMU Hz 획득
-    int32 ImuHz = msr::airlib::XlabUeMetrics::getImuHz();
+    // 2. 물리엔진 Hz 획득
     int32 LoopHz = msr::airlib::XlabUeMetrics::getLoopHz();
-
     FString PhysicsStr = FString::Printf(TEXT("물리 엔진: %d Hz"), LoopHz);
-    FString ImuStr = FString::Printf(TEXT("IMU: %d Hz"), ImuHz);
+
+    FString BuildStr = TEXT("빌드: 000");
 
     // 폰트 설정
     UFont* DebugFont = GEngine->GetMediumFont();
@@ -440,7 +439,7 @@ void ASimHUD::DrawHUD()
     FLinearColor TextColor = FLinearColor::Green;
 
     // 텍스트 그리기
-    DrawText(TimeStr, TextColor, X, Y, DebugFont, 1.2f, false);
-    DrawText(PhysicsStr, TextColor, X, Y + 25.0f, DebugFont, 1.2f, false);
-    DrawText(ImuStr, TextColor, X, Y + 50.0f, DebugFont, 1.2f, false);
+    DrawText(BuildStr, TextColor, X, Y, DebugFont, 1.8f, false);
+    DrawText(TimeStr, TextColor, X, Y + 35.0f, DebugFont, 1.8f, false);
+    DrawText(PhysicsStr, TextColor, X, Y + 70.0f, DebugFont, 1.8f, false); // 겹침 방지를 위해 Y 간격 +35.0f 단위로 조절
 }
