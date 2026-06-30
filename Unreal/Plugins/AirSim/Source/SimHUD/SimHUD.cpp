@@ -426,7 +426,7 @@ void ASimHUD::DrawHUD()
     int32 LoopHz = msr::airlib::XlabUeMetrics::getLoopHz();
     FString PhysicsStr = FString::Printf(TEXT("물리 엔진: %d Hz"), LoopHz);
 
-    FString BuildStr = TEXT("빌드: 000");
+    FString BuildStr = TEXT("빌드: 003");
 
     // 폰트 설정
     UFont* DebugFont = GEngine->GetMediumFont();

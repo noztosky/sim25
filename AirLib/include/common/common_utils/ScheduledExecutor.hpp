@@ -12,6 +12,13 @@
 #include <mutex>
 #include <cstdint>
 
+#ifdef _WIN32
+extern "C" {
+    __declspec(dllimport) void* __stdcall GetCurrentThread(void);
+    __declspec(dllimport) int __stdcall SetThreadPriority(void* hThread, int nPriority);
+}
+#endif
+
 namespace common_utils
 {
 
@@ -173,6 +180,9 @@ private:
 
     void executorLoop()
     {
+#ifdef _WIN32
+        SetThreadPriority(GetCurrentThread(), 15); // 15 is THREAD_PRIORITY_TIME_CRITICAL
+#endif
         TTimePoint call_end = nanos();
         while (started_) {
             TTimePoint period_start = nanos();

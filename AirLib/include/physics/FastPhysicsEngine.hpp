@@ -38,6 +38,7 @@
 #include <thread>
 #include <atomic>
 #include <cinttypes>
+#include <ctime>
 
 namespace msr
 {
@@ -56,6 +57,7 @@ namespace airlib
             int default_sample_hz = static_cast<int>(1e9 / static_cast<double>(phys_period) + 0.5);
             target_hz_ = static_cast<float>(Settings::singleton().getInt("ShmSampleHz", default_sample_hz));
             period_ns_ = static_cast<TTimePoint>(1e9 / static_cast<double>(target_hz_) + 0.5);
+            publish_every_step_ = (target_hz_ >= default_sample_hz);
 
             if (!xmem_inited_) {
                 xsim_ = std::make_unique<x_xsim>();
@@ -66,6 +68,21 @@ namespace airlib
                 else {
                     Utils::log("FastPhysicsEngine: Failed to create SHM server.");
                 }
+            }
+
+            // Clear existing log file on start
+            try {
+                _mkdir("d:/xlab");
+                _mkdir("d:/xlab/sim25");
+                _mkdir("d:/xlab/sim25/logs");
+                _mkdir("d:/xlab/sim25/logs/airsim");
+                int tag_hz = static_cast<int>(1e9 / static_cast<double>(phys_period) + 0.5);
+                std::string log_filename = "d:/xlab/sim25/logs/airsim/physics_jitter_" + std::to_string(tag_hz) + "hz.log";
+                std::ofstream log_f(log_filename, std::ios::out | std::ios::trunc);
+                log_f.close();
+            }
+            catch (...) {
+                // Suppress any exceptions to prevent startup failures
             }
         }
 
@@ -120,23 +137,6 @@ namespace airlib
 
         void updatePhysics(PhysicsBody& body)
         {
-            ++phys_update_cnt_;
-
-            using sclock = std::chrono::steady_clock;
-            const auto now_tp = sclock::now();
-            if (jit_first_) {
-                jit_first_ = false;
-                jit_report_tp_ = now_tp;
-            }
-            const double elapsed_sec = std::chrono::duration<double>(now_tp - jit_report_tp_).count();
-            if (elapsed_sec >= 1.0) {
-                const double phys_hz = static_cast<double>(phys_update_cnt_) / elapsed_sec;
-                XlabUeMetrics::setLoopHz(static_cast<int>(phys_hz + 0.5));
-
-                jit_report_tp_ = now_tp;
-                phys_update_cnt_ = 0;
-            }
-
             // Temporarily commented out to measure raw ScheduledExecutor thread frequency
             TTimePoint now_ns = clock()->nowNanos();
             long long period_ns = Settings::singleton().getInt("PhysicsLoopPeriod", 125000);
@@ -150,67 +150,134 @@ namespace airlib
 
         void computePhysicsStep(PhysicsBody& body, TTimeDelta dt)
         {
-            /*
             body.lock();
-            const Kinematics::State current = body.getKinematics();
-            
-            static uint32_t call_cnt = 0;
-            long long period_ns = Settings::singleton().getInt("PhysicsLoopPeriod", 125000); 
-            double current_hz = 1e9 / static_cast<double>(period_ns);
-            uint32_t skip_ticks = static_cast<uint32_t>(current_hz / 333.0 + 0.5);
-            if (skip_ticks < 1) skip_ticks = 1;
 
-            bool should_run_low_hz = (++call_cnt % skip_ticks == 0);
+            // Jitter & latency measurement (Simulation time, only for the first body)
+            if (this->size() > 0 && &body == this->at(0)) {
+                TTimePoint now_sim = clock()->nowNanos();
 
-            CollisionInfo collision_info;
-            bool is_grounded = false;
+                double dt_us = 0.0;
+                double dev_us = 0.0;
+                double target_us = dt * 1e6;
 
-            if (should_run_low_hz) {
-                collision_info = body.getCollisionInfo();
-                is_grounded = body.isGrounded();
-                
-                last_collision_info_ = collision_info;
-                last_is_grounded_ = is_grounded;
-            } else {
-                collision_info = last_collision_info_;
-                is_grounded = last_is_grounded_;
+                if (!jit_init_) {
+                    jit_init_ = true;
+                    last_sim_time_ = now_sim;
+                }
+                else {
+                    dt_us = static_cast<double>(now_sim - last_sim_time_) / 1000.0;
+                    last_sim_time_ = now_sim;
+
+                    dev_us = std::abs(dt_us - target_us);
+
+                    ++jit_count_;
+                    jit_dt_sum_us_ += dt_us;
+                    if (dt_us > jit_dt_max_us_) jit_dt_max_us_ = dt_us;
+                    if (dt_us < jit_dt_min_us_) jit_dt_min_us_ = dt_us;
+                    jit_dev_sum_us_ += dev_us;
+                    if (dev_us > jit_dev_max_us_) jit_dev_max_us_ = dev_us;
+                }
+
+                // Track Hz in simulation time
+                TTimePoint now_ns = clock()->nowNanos();
+                auto now_wall_report = std::chrono::steady_clock::now();
+                if (last_report_sim_time_ == 0) {
+                    last_report_sim_time_ = now_ns;
+                    last_report_wall_time_ = now_wall_report;
+                }
+
+                ++sim_update_cnt_;
+
+                TTimePoint elapsed_ns = now_ns - last_report_sim_time_;
+                if (elapsed_ns >= 1000000000ULL) { // 1 second of simulation time
+                    double elapsed_sec = static_cast<double>(elapsed_ns) / 1e9;
+                    double phys_hz = static_cast<double>(sim_update_cnt_) / elapsed_sec;
+                    double elapsed_real_sec = std::chrono::duration<double>(now_wall_report - last_report_wall_time_).count();
+                    double real_hz = elapsed_real_sec > 0.0 ? static_cast<double>(sim_update_cnt_) / elapsed_real_sec : 0.0;
+                    last_report_wall_time_ = now_wall_report;
+
+                    XlabUeMetrics::setLoopHz(static_cast<int>(phys_hz + 0.5));
+
+                    // Write jitter and latency log to d:/xlab/sim25/logs/airsim/physics_jitter.log
+                    if (jit_count_ > 0) {
+                        double mean_dt = jit_dt_sum_us_ / jit_count_;
+                        double mean_dev = jit_dev_sum_us_ / jit_count_;
+
+                        try {
+                            _mkdir("d:/xlab");
+                            _mkdir("d:/xlab/sim25");
+                            _mkdir("d:/xlab/sim25/logs");
+                            _mkdir("d:/xlab/sim25/logs/airsim");
+
+                            double target_hz = 1e6 / target_us;
+                            double err_pct = target_hz > 0.0 ? std::abs(phys_hz - target_hz) / target_hz * 100.0 : 0.0;
+
+                            int tag_hz = static_cast<int>(target_hz + 0.5);
+                            std::string log_filename = "d:/xlab/sim25/logs/airsim/physics_jitter_" + std::to_string(tag_hz) + "hz.log";
+                            std::ofstream log_f(log_filename, std::ios::out | std::ios::app);
+                            if (log_f.is_open()) {
+                                time_t t = time(nullptr);
+                                struct tm tm_info;
+                                localtime_s(&tm_info, &t);
+                                char time_str[32];
+                                strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_info);
+
+                                log_f << Utils::stringf("[%s] | Target: %.1fHz | Detected: %.1fHz | Real: %.1fHz | Err%%: %.3f%% | Jitter(us): mean=%.3f, max=%.3f | dt(us) min/mean/max: %.2f/%.2f/%.2f | Count: %llu\n",
+                                                        time_str,
+                                                        target_hz,
+                                                        phys_hz,
+                                                        real_hz,
+                                                        err_pct,
+                                                        mean_dev,
+                                                        jit_dev_max_us_,
+                                                        jit_dt_min_us_,
+                                                        mean_dt,
+                                                        jit_dt_max_us_,
+                                                        (unsigned long long)jit_count_);
+                            }
+                        }
+                        catch (...) {
+                            // Suppress any log folder/file exceptions to prevent physics loops from breaking
+                        }
+
+                        // Reset jitter stats
+                        jit_count_ = 0;
+                        jit_dt_sum_us_ = 0.0;
+                        jit_dt_max_us_ = 0.0;
+                        jit_dt_min_us_ = 1e18;
+                        jit_dev_sum_us_ = 0.0;
+                        jit_dev_max_us_ = 0.0;
+                    }
+
+                    last_report_sim_time_ = now_ns;
+                    sim_update_cnt_ = 0;
+                }
             }
-            body.unlock();
-            */
 
             const Kinematics::State current = body.getKinematics();
             Kinematics::State next;
             Wrench next_wrench;
 
+            // Compute response as if there was no collision
             getNextKinematicsNoCollision(dt, body, current, next, next_wrench, wind_);
 
-            /*
-            bool has_collision_response = false;
-            bool is_collision_response = false;
+            // Query collision and ground information directly
+            const CollisionInfo collision_info = body.getCollisionInfo();
+            CollisionResponse& collision_response = body.getCollisionResponseInfo();
 
-            if (should_run_low_hz && (is_grounded || collision_info.has_collided)) {
-                is_collision_response = getNextKinematicsOnCollision(dt, collision_info, body, current, next, next_wrench, enable_ground_lock_);
-                has_collision_response = true;
+            if (body.isGrounded() || (collision_info.has_collided && collision_response.collision_time_stamp != collision_info.time_stamp)) {
+                bool is_collision_response = getNextKinematicsOnCollision(dt, collision_info, body, current, next, next_wrench, enable_ground_lock_);
+                updateCollisionResponseInfo(collision_info, next, is_collision_response, collision_response);
             }
 
-            if (should_run_low_hz) {
-                body.lock();
-                body.setWrench(next_wrench);
-                body.updateKinematics(next);
-                if (has_collision_response) {
-                    CollisionResponse& collision_response = body.getCollisionResponseInfo();
-                    if (collision_response.collision_time_stamp != collision_info.time_stamp) {
-                        updateCollisionResponseInfo(collision_info, next, is_collision_response, collision_response);
-                    }
-                }
-                body.unlock();
-            }
+            body.setWrench(next_wrench);
+            body.updateKinematics(next);
 
             if (xmem_inited_ && target_hz_ > 0) {
                 publishToShm(body, clock()->nowNanos());
             }
-            */
-            unused(dt);
+
+            body.unlock();
         }
 
         static void updateCollisionResponseInfo(const CollisionInfo& collision_info, const Kinematics::State& next,
@@ -264,7 +331,8 @@ namespace airlib
                 // looks like we are coliding with the ground.  We don't want the ground to be so bouncy
                 // so we reduce the coefficient of restitution.  0 means no bounce.
                 // TODO: it would be better if we did this based on the material we are landing on.
-                // e.g. grass should be inelastic, but a hard surface like the road should be more bouncy.
+                // e.g. grass should be inelastic, but a hard surface li+
+                // ke the road should be more bouncy.
                 restitution = 0;
                 // crank up friction with the ground so it doesn't try and slide across the ground
                 // again, this should depend on the type of surface we are landing on.
@@ -551,69 +619,73 @@ namespace airlib
     private:
         void publishToShm(PhysicsBody& body, TTimePoint now_ns)
         {
-            if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
+            bool should_publish = publish_every_step_;
+
+            if (!should_publish) {
+                if (next_write_tp_ns_ == 0) {
+                    next_write_tp_ns_ = now_ns;
+                }
+
+                // Using half-period tolerance to prevent float/double numerical inaccuracies from skipping steps
+                if (static_cast<long long>(now_ns - next_write_tp_ns_) >= -static_cast<long long>(period_ns_ / 2)) {
+                    should_publish = true;
+                    next_write_tp_ns_ += period_ns_;
+                }
+            }
+
+            if (should_publish) {
                 const Kinematics::State& state = body.getKinematics();
                 const Environment& env = body.getEnvironment();
 
-                int batch_emits = 0;
-                constexpr int kMaxBatch = 500;
-                while (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0 && batch_emits < kMaxBatch) {
-                    XSimTelemetry d;
+                XSimTelemetry d;
 
-                    // compute IMU acceleration (gravity excluded)
-                    Vector3r gravity = env.getState().gravity;
-                    Vector3r lin_acc = state.accelerations.linear - gravity;
+                // compute IMU acceleration (gravity excluded)
+                Vector3r gravity = env.getState().gravity;
+                Vector3r lin_acc = state.accelerations.linear - gravity;
 
-                    // transform to body frame
-                    Vector3r acc_body = VectorMath::transformToBodyFrame(lin_acc, state.pose.orientation, true);
-                    Vector3r gyro_body = state.twist.angular;
+                // transform to body frame
+                Vector3r acc_body = VectorMath::transformToBodyFrame(lin_acc, state.pose.orientation, true);
+                Vector3r gyro_body = state.twist.angular;
 
-                    d.gyro[0] = static_cast<double>(gyro_body.x());
-                    d.gyro[1] = static_cast<double>(gyro_body.y());
-                    d.gyro[2] = static_cast<double>(gyro_body.z());
+                d.gyro[0] = static_cast<double>(gyro_body.x());
+                d.gyro[1] = static_cast<double>(gyro_body.y());
+                d.gyro[2] = static_cast<double>(gyro_body.z());
 
-                    d.acc[0] = static_cast<double>(acc_body.x());
-                    d.acc[1] = static_cast<double>(acc_body.y());
-                    d.acc[2] = static_cast<double>(acc_body.z());
+                d.acc[0] = static_cast<double>(acc_body.x());
+                d.acc[1] = static_cast<double>(acc_body.y());
+                d.acc[2] = static_cast<double>(acc_body.z());
 
-                    const auto& q = state.pose.orientation;
-                    d.quat[0] = q.w();
-                    d.quat[1] = q.x();
-                    d.quat[2] = q.y();
-                    d.quat[3] = q.z();
+                const auto& q = state.pose.orientation;
+                d.quat[0] = q.w();
+                d.quat[1] = q.x();
+                d.quat[2] = q.y();
+                d.quat[3] = q.z();
 
-                    d.loc_ned[0] = static_cast<double>(state.pose.position.x());
-                    d.loc_ned[1] = static_cast<double>(state.pose.position.y());
-                    d.loc_ned[2] = static_cast<double>(state.pose.position.z());
+                d.loc_ned[0] = static_cast<double>(state.pose.position.x());
+                d.loc_ned[1] = static_cast<double>(state.pose.position.y());
+                d.loc_ned[2] = static_cast<double>(state.pose.position.z());
 
-                    d.vel_ned[0] = static_cast<double>(state.twist.linear.x());
-                    d.vel_ned[1] = static_cast<double>(state.twist.linear.y());
-                    d.vel_ned[2] = static_cast<double>(state.twist.linear.z());
+                d.vel_ned[0] = static_cast<double>(state.twist.linear.x());
+                d.vel_ned[1] = static_cast<double>(state.twist.linear.y());
+                d.vel_ned[2] = static_cast<double>(state.twist.linear.z());
 
-                    d.alt = -d.loc_ned[2];
-                    d.pressure = 101325.0 * std::pow(1.0 - 2.25577e-5 * d.alt, 5.25588);
-                    d.temperature = 15.0 - 0.0065 * d.alt;
+                d.alt = -d.loc_ned[2];
+                d.pressure = 101325.0 * std::pow(1.0 - 2.25577e-5 * d.alt, 5.25588);
+                d.temperature = 15.0 - 0.0065 * d.alt;
 
-                    Vector3r mag_world = EarthUtils::getMagField(env.getState().geo_point) * 1E4f;
-                    Vector3r mag_body = VectorMath::transformToBodyFrame(mag_world, q, true);
-                    d.mag[0] = static_cast<double>(mag_body.x());
-                    d.mag[1] = static_cast<double>(mag_body.y());
-                    d.mag[2] = static_cast<double>(mag_body.z());
+                Vector3r mag_world = EarthUtils::getMagField(env.getState().geo_point) * 1E4f;
+                Vector3r mag_body = VectorMath::transformToBodyFrame(mag_world, q, true);
+                d.mag[0] = static_cast<double>(mag_body.x());
+                d.mag[1] = static_cast<double>(mag_body.y());
+                d.mag[2] = static_cast<double>(mag_body.z());
 
-                    d.timestamp = static_cast<long long>(next_write_tp_ns_);
-                    d.seq = static_cast<int>(++imu_seq_);
-                    d.is_valid = true;
+                d.timestamp = static_cast<long long>(now_ns);
+                d.seq = static_cast<int>(++imu_seq_);
+                d.is_valid = true;
 
-                    // Commented out to test raw physics loop speed
-                    // if (xsim_) xsim_->publish_telem(d);
+                if (xsim_) xsim_->publish_telem(d);
 
-                    next_write_tp_ns_ += period_ns_;
-                    ++batch_emits;
-                }
-
-                if (static_cast<long long>(now_ns - next_write_tp_ns_) >= 0) {
-                    next_write_tp_ns_ = now_ns + period_ns_;
-                }
+                next_write_tp_ns_ += period_ns_;
             }
         }
 
@@ -632,6 +704,7 @@ namespace airlib
         std::unique_ptr<x_xsim> xsim_;
         bool xmem_inited_ = false;
         float target_hz_ = 1000.0f;
+        bool publish_every_step_ = false;
         TTimePoint next_write_tp_ns_ = 0;
         TTimePoint period_ns_ = 1000000;
         uint32_t imu_seq_ = 0;
@@ -640,6 +713,21 @@ namespace airlib
         uint32_t phys_update_cnt_ = 0;
         std::chrono::steady_clock::time_point jit_report_tp_{};
         bool jit_first_ = true;
+
+        // Simulation time statistics
+        uint32_t sim_update_cnt_ = 0;
+        TTimePoint last_report_sim_time_ = 0;
+        std::chrono::steady_clock::time_point last_report_wall_time_{};
+
+        // Jitter & Latency tracking (Simulation time)
+        TTimePoint last_sim_time_ = 0;
+        bool jit_init_ = false;
+        uint64_t jit_count_ = 0;
+        double jit_dt_sum_us_ = 0.0;
+        double jit_dt_max_us_ = 0.0;
+        double jit_dt_min_us_ = 1e18;
+        double jit_dev_sum_us_ = 0.0;
+        double jit_dev_max_us_ = 0.0;
 
         // Collision cache for 333Hz downsampling
         CollisionInfo last_collision_info_{};

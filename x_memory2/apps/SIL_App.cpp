@@ -3,6 +3,7 @@
 #include <ws2tcpip.h>
 #include <iostream>
 #include <windows.h>
+#include <direct.h>
 #include <thread>
 #include <chrono>
 #include <vector>
@@ -169,8 +170,15 @@ int main(int argc, char* argv[]) {
     
     // Frequency-tagged log filenames so 1k/4k/8k runs don't overwrite each other
     int hz_tag = (int)(target_hz + 0.5);
-    std::string flight_log_name = "flight_log_" + std::to_string(hz_tag) + "hz.csv";
-    std::string perf_log_name = "perf_log_" + std::to_string(hz_tag) + "hz.csv";
+    std::string log_dir = "d:/xlab/sim25/logs/silapp/";
+    // Ensure folders exist
+    _mkdir("d:/xlab");
+    _mkdir("d:/xlab/sim25");
+    _mkdir("d:/xlab/sim25/logs");
+    _mkdir("d:/xlab/sim25/logs/silapp");
+
+    std::string flight_log_name = log_dir + "flight_log_" + std::to_string(hz_tag) + "hz.csv";
+    std::string perf_log_name = log_dir + "perf_log_" + std::to_string(hz_tag) + "hz.log";
 
     SHM_Driver driver("AirSimXsim");
     IMU_SimSHM imu(driver);
@@ -188,6 +196,12 @@ int main(int argc, char* argv[]) {
     log_file.open(flight_log_name);
     if (log_file.is_open()) {
         log_file << "timestamp_ns,dt,raw_baro_alt,gps_alt,ekf_alt,ekf_vel_z,pid_target,pid_out_throttle\n";
+    }
+
+    // Clear performance log
+    {
+        std::ofstream perf_f(perf_log_name, std::ios::out | std::ios::trunc);
+        perf_f.close();
     }
 
     // Reset simulation environment via RPC before starting/connecting SHM
@@ -275,60 +289,139 @@ int main(int argc, char* argv[]) {
 
     // --- Latency/Jitter perf logging (dumped to perf_log.csv at exit) ---
     const double IMU_TARGET_US = 1000000.0 / target_hz;
-    std::vector<PerfSample> perf_samples;
-    perf_samples.reserve(2000000); // ~250s @8kHz; recording stops once capacity is reached
-    auto loop_start_wall = std::chrono::steady_clock::now();
-    auto last_proc_wall = loop_start_wall;
+    uint64_t start_sim_ts = 0;
+    uint64_t last_processed_sim_ts = 0;
     bool perf_first = true;
+
+    // 1-second summary statistic variables
+    uint32_t sil_count = 0;
+    double sil_dt_sum = 0.0;
+    double sil_dt_max = 0.0;
+    double sil_dt_min = 1e18;
+    double sil_dev_sum = 0.0;
+    double sil_dev_max = 0.0;
+    double sil_read_sum = 0.0;
+    double sil_read_max = 0.0;
+    double sil_read_min = 1e18;
+    uint64_t last_report_sim_time = 0;
+    auto last_report_wall_time = std::chrono::steady_clock::now();
 
     std::cout << "[SIL_App] Loop starting..." << std::endl;
     std::cout << "   Hist (Delay%): [0]<5%, [1]<10%, [2]<15%, [3]<20%, [4]<30%, [5]>=30%" << std::endl;
 
-    // --- Fixed-rate loop scheduler: coarse sleep_until then spin to hit each deadline ---
-    const auto tick_period = std::chrono::nanoseconds((long long)(1000000000.0 / target_hz));
-    auto next_deadline = std::chrono::steady_clock::now() + tick_period;
-
     while (!should_exit) {
-        // Coarse sleep to release CPU (only effective when period > ~1ms on Windows),
-        // then busy-spin the remainder for precise deadline hit (required for 4k/8k).
-        auto coarse_wake = next_deadline - std::chrono::microseconds(1000);
-        if (coarse_wake > std::chrono::steady_clock::now())
-            std::this_thread::sleep_until(coarse_wake);
-        while (std::chrono::steady_clock::now() < next_deadline) { YieldProcessor(); }
-
-        auto t_wake = std::chrono::steady_clock::now();
-        double tick_jitter_us = std::chrono::duration<double, std::micro>(t_wake - next_deadline).count();
-        next_deadline += tick_period;
-        // If we fell badly behind (e.g. after an OS hiccup), realign instead of bursting.
-        if (next_deadline < t_wake) next_deadline = t_wake + tick_period;
-
         auto t_imu_start = std::chrono::steady_clock::now();
-        bool success = imu.read(imu_data);
+        bool success = false;
+
+        // Busy-spin waiting for new telemetry packet
+        while (!should_exit) {
+            if (imu.read(imu_data)) {
+                success = true;
+                break;
+            }
+            YieldProcessor();
+        }
+        if (!success) continue;
+
         auto t_imu_end = std::chrono::steady_clock::now();
 
-        if (success) {
-            if (last_imu_ts == 0) last_imu_ts = imu_data.timestamp_ns;
+        if (start_sim_ts == 0) {
+            start_sim_ts = imu_data.timestamp_ns;
+            last_processed_sim_ts = imu_data.timestamp_ns;
+        }
 
-            uint64_t diff = imu_data.timestamp_ns - last_imu_ts;
+        uint64_t diff = imu_data.timestamp_ns - last_processed_sim_ts;
+        last_processed_sim_ts = imu_data.timestamp_ns;
 
-            {   // process every scheduled tick (rate is set by the scheduler, no sim-time gate)
-                stats.recordImuCall(std::chrono::duration<double, std::milli>(t_imu_end - t_imu_start).count());
-                stats.recordValidImu(diff / 1000000.0);
+        {   // process every scheduled tick
+            stats.recordImuCall(std::chrono::duration<double, std::milli>(t_imu_end - t_imu_start).count());
+            stats.recordValidImu(diff / 1000000.0);
 
-                float dt = 1.0f / (float)target_hz;   // nominal fixed loop period
-                last_imu_ts = imu_data.timestamp_ns;
+            float dt = 1.0f / (float)target_hz;   // nominal fixed loop period
+            last_imu_ts = imu_data.timestamp_ns;
 
-                // --- Latency/Jitter sample: deadline miss (tick_jitter) is the true scheduling jitter ---
-                double perf_read_us = std::chrono::duration<double, std::micro>(t_imu_end - t_imu_start).count();
-                double perf_wall_us = std::chrono::duration<double, std::micro>(t_wake - loop_start_wall).count();
-                double perf_inter_us = perf_first ? 0.0 : std::chrono::duration<double, std::micro>(t_wake - last_proc_wall).count();
-                double perf_jit_us = tick_jitter_us;
-                last_proc_wall = t_wake;
-                perf_first = false;
-                if (perf_samples.size() < perf_samples.capacity()) {
-                    perf_samples.push_back({ imu_data.timestamp_ns, perf_wall_us, perf_read_us,
-                                             perf_inter_us, perf_jit_us, (double)diff * 1e-3 });
-                }
+            // --- Latency/Jitter sample: measured in simulation time ---
+            double perf_read_us = std::chrono::duration<double, std::micro>(t_imu_end - t_imu_start).count();
+            double perf_inter_us = perf_first ? (1000000.0 / target_hz) : (double)diff / 1000.0;
+            double perf_jit_us = std::abs(perf_inter_us - IMU_TARGET_US);
+            perf_first = false;
+
+            // Accumulate statistics
+            sil_count++;
+            sil_dt_sum += perf_inter_us;
+            if (perf_inter_us > sil_dt_max) sil_dt_max = perf_inter_us;
+            if (perf_inter_us < sil_dt_min) sil_dt_min = perf_inter_us;
+            
+            sil_dev_sum += perf_jit_us;
+            if (perf_jit_us > sil_dev_max) sil_dev_max = perf_jit_us;
+
+            sil_read_sum += perf_read_us;
+            if (perf_read_us > sil_read_max) sil_read_max = perf_read_us;
+            if (perf_read_us < sil_read_min) sil_read_min = perf_read_us;
+
+            if (last_report_sim_time == 0) {
+                last_report_sim_time = imu_data.timestamp_ns;
+                last_report_wall_time = std::chrono::steady_clock::now();
+            }
+
+            uint64_t elapsed_ns = imu_data.timestamp_ns - last_report_sim_time;
+            if (elapsed_ns >= 1000000000ULL) { // 1 second of simulation time
+                double elapsed_sec = static_cast<double>(elapsed_ns) / 1e9;
+                double phys_hz = static_cast<double>(sil_count) / elapsed_sec;
+                
+                auto now_wall_report = std::chrono::steady_clock::now();
+                double elapsed_real_sec = std::chrono::duration<double>(now_wall_report - last_report_wall_time).count();
+                double real_hz = elapsed_real_sec > 0.0 ? static_cast<double>(sil_count) / elapsed_real_sec : 0.0;
+                
+                try {
+                    std::ofstream log_f(perf_log_name, std::ios::out | std::ios::app);
+                    if (log_f.is_open()) {
+                        time_t t = time(nullptr);
+                        struct tm tm_info;
+                        localtime_s(&tm_info, &t);
+                        char time_str[32];
+                        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_info);
+
+                        double err_pct = std::abs(phys_hz - target_hz) / target_hz * 100.0;
+                        double mean_dt = sil_dt_sum / sil_count;
+                        double mean_dev = sil_dev_sum / sil_count;
+                        double mean_read = sil_read_sum / sil_count;
+
+                        char log_line[512];
+                        sprintf_s(log_line, sizeof(log_line),
+                                  "[%s] | Target: %.1fHz | Detected: %.1fHz | Real: %.1fHz | Err%%: %.3f%% | Jitter(us): mean=%.3f, max=%.3f | dt(us) min/mean/max: %.2f/%.2f/%.2f | Latency(us) min/mean/max: %.2f/%.2f/%.2f | Count: %llu\n",
+                                  time_str,
+                                  target_hz,
+                                  phys_hz,
+                                  real_hz,
+                                  err_pct,
+                                  mean_dev,
+                                  sil_dev_max,
+                                  sil_dt_min,
+                                  mean_dt,
+                                  sil_dt_max,
+                                  sil_read_min,
+                                  mean_read,
+                                  sil_read_max,
+                                  (unsigned long long)sil_count);
+                        log_f << log_line;
+                    }
+                } catch (...) {}
+
+                // Reset stats
+                sil_count = 0;
+                sil_dt_sum = 0.0;
+                sil_dt_max = 0.0;
+                sil_dt_min = 1e18;
+                sil_dev_sum = 0.0;
+                sil_dev_max = 0.0;
+                sil_read_sum = 0.0;
+                sil_read_max = 0.0;
+                sil_read_min = 1e18;
+                
+                last_report_sim_time = imu_data.timestamp_ns;
+                last_report_wall_time = now_wall_report;
+            }
 
                 // Propagate EKF state using IMU
                 ekf.update_imu(imu_data);
@@ -534,7 +627,6 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
-        }
 
         // --- 2. Actuator Writing (400Hz) ---
         // Use IMU timestamp for synchronization
@@ -561,48 +653,13 @@ int main(int argc, char* argv[]) {
 
     if (log_file.is_open()) {
         log_file.close();
-        printf("[SIL_App] Log file saved to %s in the current working directory.\n", flight_log_name.c_str());
+        printf("[SIL_App] Log file saved to %s.\n", flight_log_name.c_str());
     }
 
-    // --- Dump per-sample latency/jitter log + print summary ---
+    // --- Print performance log location summary ---
     {
-        std::ofstream pf(perf_log_name);
-        pf << "idx,sim_ts_ns,wall_us,read_us,interarrival_us,jitter_us,sim_dt_us\n";
-        std::vector<double> inter;   // interarrival samples (skip first)
-        std::vector<double> readv;   // read-latency samples (skip first)
-        inter.reserve(perf_samples.size());
-        readv.reserve(perf_samples.size());
-        for (size_t i = 0; i < perf_samples.size(); ++i) {
-            const PerfSample& s = perf_samples[i];
-            pf << i << "," << s.sim_ts_ns << "," << s.wall_us << "," << s.read_us << ","
-               << s.interarrival_us << "," << s.jitter_us << "," << s.sim_dt_us << "\n";
-            if (i > 0) { inter.push_back(s.interarrival_us); readv.push_back(s.read_us); }
-        }
-        pf.close();
-
-        if (!inter.empty()) {
-            std::sort(inter.begin(), inter.end());
-            std::sort(readv.begin(), readv.end());
-            auto pct = [](const std::vector<double>& v, double p) {
-                return v[(size_t)(p * (v.size() - 1))];
-            };
-            double sum = 0.0, sq = 0.0;
-            for (double x : inter) { sum += x; sq += x * x; }
-            double mean = sum / inter.size();
-            double sd = std::sqrt(std::max(0.0, sq / inter.size() - mean * mean));
-            double rsum = 0.0;
-            for (double x : readv) rsum += x;
-            double rmean = rsum / readv.size();
-
-            printf("\n[Perf] target=%.2f us (%.0f Hz) | processed samples=%zu\n",
-                   IMU_TARGET_US, target_hz, perf_samples.size());
-            printf("[Perf] interarrival (us): mean=%.2f std=%.2f min=%.2f p50=%.2f p95=%.2f p99=%.2f p99.9=%.2f max=%.2f\n",
-                   mean, sd, inter.front(), pct(inter, 0.50), pct(inter, 0.95),
-                   pct(inter, 0.99), pct(inter, 0.999), inter.back());
-            printf("[Perf] jitter vs target (us): mean=%.2f | read latency (us): mean=%.2f p95=%.2f max=%.2f\n",
-                   mean - IMU_TARGET_US, rmean, pct(readv, 0.95), readv.back());
-            printf("[Perf] %s saved (%zu rows).\n", perf_log_name.c_str(), perf_samples.size());
-        }
+        std::string perf_log_txt = log_dir + "perf_log_" + std::to_string(hz_tag) + "hz.log";
+        printf("[SIL_App] Performance summary log saved to %s.\n", perf_log_txt.c_str());
     }
 
     return 0;

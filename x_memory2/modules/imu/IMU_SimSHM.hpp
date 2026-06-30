@@ -2,6 +2,7 @@
 #include "../../core/IMU_IF.hpp"
 #include "../../drivers/shm/SHM_Driver.hpp"
 #include <iostream>
+#include <queue>
 
 class IMU_SimSHM : public IMU_IF {
 public:
@@ -15,34 +16,35 @@ public:
     bool read(IMUData& out_data) override {
         if (!driver_.is_connected()) return false;
 
-        // Use x_xsim's consume_telem to get latest data
-        // We only need the LATEST sample for control loop usually, 
-        // or we queue them. Here we just get the latest one available.
-        
-        bool got_new_data = false;
-        
-        // Lambda to extract data
+        // Consume all new samples from SHM and push to buffer
         auto on_sample = [&](const XSimTelemetry& d) {
-            out_data.timestamp_ns = d.timestamp;
-            out_data.accel[0] = d.acc[0];
-            out_data.accel[1] = d.acc[1];
-            out_data.accel[2] = d.acc[2];
+            IMUData sample;
+            sample.timestamp_ns = d.timestamp;
+            sample.accel[0] = d.acc[0];
+            sample.accel[1] = d.acc[1];
+            sample.accel[2] = d.acc[2];
             
-            out_data.gyro[0] = d.gyro[0];
-            out_data.gyro[1] = d.gyro[1];
-            out_data.gyro[2] = d.gyro[2];
+            sample.gyro[0] = d.gyro[0];
+            sample.gyro[1] = d.gyro[1];
+            sample.gyro[2] = d.gyro[2];
             
-            out_data.mag[0] = d.mag[0];
-            out_data.mag[1] = d.mag[1];
-            out_data.mag[2] = d.mag[2];
+            sample.mag[0] = d.mag[0];
+            sample.mag[1] = d.mag[1];
+            sample.mag[2] = d.mag[2];
             
-            got_new_data = true;
+            buffer_.push(sample);
         };
 
-        // consume_telem updates last_seq internally
         driver_.get_xsim().consume_telem(last_seq_, on_sample);
+
+        // Return the oldest sample from queue
+        if (!buffer_.empty()) {
+            out_data = buffer_.front();
+            buffer_.pop();
+            return true;
+        }
         
-        return got_new_data;
+        return false;
     }
 
     bool is_healthy() const override {
@@ -52,4 +54,5 @@ public:
 private:
     SHM_Driver& driver_;
     uint32_t last_seq_ = 0;
+    std::queue<IMUData> buffer_;
 };
