@@ -79,6 +79,21 @@ namespace airlib
                 int tag_hz = static_cast<int>(1e9 / static_cast<double>(phys_period) + 0.5);
                 std::string log_filename = "d:/xlab/sim25/logs/airsim/physics_jitter_" + std::to_string(tag_hz) + "hz.log";
                 std::ofstream log_f(log_filename, std::ios::out | std::ios::trunc);
+                // Header: run start time + build (compile) timestamp so each log
+                // self-identifies which binary produced it.
+                {
+                    time_t t = time(nullptr);
+                    struct tm tm_info;
+                    localtime_s(&tm_info, &t);
+                    char time_str[32];
+                    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_info);
+                    log_f << "# run_start: " << time_str
+                          << " | build: " << __DATE__ << " " << __TIME__
+                          << " | PhysicsLoopPeriod(ns): " << phys_period
+                          << " | ShmSampleHz: " << static_cast<int>(target_hz_ + 0.5f)
+                          << " | publish_every_step: " << (publish_every_step_ ? "yes" : "no(downsample)")
+                          << " | fix: no-double-advance\n";
+                }
                 log_f.close();
             }
             catch (...) {
@@ -185,6 +200,9 @@ namespace airlib
                     last_report_sim_time_ = now_ns;
                     last_report_wall_time_ = now_wall_report;
                 }
+                // Feed simulation clock to HUD (elapsed sim time since engine start)
+                if (sim_start_ns_ == 0) sim_start_ns_ = now_ns;
+                XlabUeMetrics::setSimTimeNs(static_cast<long long>(now_ns - sim_start_ns_));
 
                 ++sim_update_cnt_;
 
@@ -197,6 +215,9 @@ namespace airlib
                     last_report_wall_time_ = now_wall_report;
 
                     XlabUeMetrics::setLoopHz(static_cast<int>(phys_hz + 0.5));
+                    // RTF = sim elapsed / wall elapsed (percent)
+                    if (elapsed_real_sec > 0.0)
+                        XlabUeMetrics::setRtfPct(static_cast<int>(100.0 * elapsed_sec / elapsed_real_sec + 0.5));
 
                     // Write jitter and latency log to d:/xlab/sim25/logs/airsim/physics_jitter.log
                     if (jit_count_ > 0) {
@@ -684,8 +705,9 @@ namespace airlib
                 d.is_valid = true;
 
                 if (xsim_) xsim_->publish_telem(d);
-
-                next_write_tp_ns_ += period_ns_;
+                // NOTE: next_write_tp_ns_ is advanced in the downsample branch above
+                // (line ~632). Advancing it here as well doubled the step and halved
+                // the effective sample rate in downsample mode (ShmSampleHz < physics).
             }
         }
 
@@ -699,6 +721,9 @@ namespace airlib
         bool enable_ground_lock_;
         TTimePoint last_message_time;
         Vector3r wind_;
+
+        // simulation clock start (for HUD elapsed sim time)
+        TTimePoint sim_start_ns_ = 0;
 
         // SHM composite variables
         std::unique_ptr<x_xsim> xsim_;

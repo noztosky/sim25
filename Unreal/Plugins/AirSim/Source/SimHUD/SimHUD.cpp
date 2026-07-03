@@ -414,13 +414,15 @@ void ASimHUD::DrawHUD()
 
     if (!Canvas) return;
 
-    // 1. 현재시각 포맷팅 (00:00.00 형식)
-    float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    int32 Minutes = FMath::FloorToInt(CurrentTime / 60.0f);
-    int32 Seconds = FMath::FloorToInt(CurrentTime) % 60;
-    int32 Centiseconds = FMath::FloorToInt((CurrentTime - FMath::FloorToFloat(CurrentTime)) * 100.0f);
+    // 1. 시뮬레이션 시간 (물리 steppable clock 기준, 00:00.00 형식) + RTF
+    double SimTimeSec = static_cast<double>(msr::airlib::XlabUeMetrics::getSimTimeNs()) / 1e9;
+    int32 Minutes = FMath::FloorToInt(SimTimeSec / 60.0);
+    int32 Seconds = FMath::FloorToInt(SimTimeSec) % 60;
+    int32 Centiseconds = FMath::FloorToInt((SimTimeSec - FMath::FloorToDouble(SimTimeSec)) * 100.0);
+    int32 RtfPct = msr::airlib::XlabUeMetrics::getRtfPct();
 
-    FString TimeStr = FString::Printf(TEXT("현재시각: %02d:%02d.%02d"), Minutes, Seconds, Centiseconds);
+    FString TimeStr = FString::Printf(TEXT("시뮬시간: %02d:%02d.%02d (RTF %d.%02d)"),
+                                      Minutes, Seconds, Centiseconds, RtfPct / 100, RtfPct % 100);
 
     // 2. 물리엔진 Hz 획득
     int32 LoopHz = msr::airlib::XlabUeMetrics::getLoopHz();

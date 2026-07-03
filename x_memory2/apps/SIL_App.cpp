@@ -141,7 +141,7 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
 int main(int argc, char* argv[]) {
     timeBeginPeriod(1);
 
-    double target_hz = 8000.0;
+    double target_hz = 1000.0;
     bool is_takeoff_active = false;
     double target_altitude = 0.0;
     float current_target_alt = 0.0f;
@@ -594,7 +594,7 @@ int main(int argc, char* argv[]) {
 
                 static int print_counter = 0;
                 print_counter++;
-                if (print_counter >= 8000) { // ~1 second interval at 8kHz
+                if (print_counter >= (int)target_hz) { // ~1 second interval
                     print_counter = 0;
 
                     // Compute Euler angles for EKF

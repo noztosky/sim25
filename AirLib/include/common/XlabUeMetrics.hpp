@@ -54,6 +54,11 @@ struct XlabUeMetrics {
     {
         return getImuSkipHzRef().load(std::memory_order_relaxed);
     }
+    // --- simulation clock (physics steppable clock), fed by FastPhysicsEngine ---
+    static void setSimTimeNs(long long ns) { getSimTimeNsRef().store(ns, std::memory_order_relaxed); }
+    static long long getSimTimeNs() { return getSimTimeNsRef().load(std::memory_order_relaxed); }
+    static void setRtfPct(int pct) { getRtfPctRef().store(pct, std::memory_order_relaxed); }
+    static int  getRtfPct() { return getRtfPctRef().load(std::memory_order_relaxed); }
     // --- physics/SHM sampling loop jitter (us), measured in ImuXsim ---
     static void setLoopHz(int hz) { getLoopHzRef().store(hz, std::memory_order_relaxed); }
     static int  getLoopHz() { return getLoopHzRef().load(std::memory_order_relaxed); }
@@ -93,6 +98,16 @@ private:
     {
         static std::atomic<int> imu_skip_hz_i(0);
         return imu_skip_hz_i;
+    }
+    static std::atomic<long long>& getSimTimeNsRef()
+    {
+        static std::atomic<long long> sim_time_ns_i(0);
+        return sim_time_ns_i;
+    }
+    static std::atomic<int>& getRtfPctRef()
+    {
+        static std::atomic<int> rtf_pct_i(0);
+        return rtf_pct_i;
     }
     static std::atomic<int>& getLoopHzRef()
     {

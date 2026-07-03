@@ -3,7 +3,6 @@
     "SettingsVersion":  1.2,
     "SimMode":  "Multirotor",
     "ClockSpeed":  1.0,
-    "ClockType":  "ScalableClock",
     "Vehicles":  {
                      "SimpleFlight":  {
                                           "VehicleType":  "SimpleFlight",
@@ -59,5 +58,6 @@
                                      0.0,
                                      0.5
                                  ],
+    "ClockType":  "SteppableClock",
     "PhysicsLoopPeriod":  1000000
 }
