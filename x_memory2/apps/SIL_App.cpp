@@ -192,15 +192,38 @@ int main(int argc, char* argv[]) {
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
     std::thread cmd_thread(command_listener_thread);
 
+    // Version header: run start + build (compile) timestamp so each log/console
+    // self-identifies which binary and settings produced it.
+    char run_start_str[32];
+    {
+        time_t t = time(nullptr);
+        struct tm tm_info;
+        localtime_s(&tm_info, &t);
+        strftime(run_start_str, sizeof(run_start_str), "%Y-%m-%d %H:%M:%S", &tm_info);
+    }
+    printf("[SIL_App] run_start: %s | build: %s %s | target_hz: %.0f%s\n",
+           run_start_str, __DATE__, __TIME__, target_hz, is_takeoff_active ? " | takeoff" : "");
+
     // Open CSV flight log
     log_file.open(flight_log_name);
     if (log_file.is_open()) {
-        log_file << "timestamp_ns,dt,raw_baro_alt,gps_alt,ekf_alt,ekf_vel_z,pid_target,pid_out_throttle\n";
+        log_file << "# run_start: " << run_start_str
+                 << " | build: " << __DATE__ << " " << __TIME__
+                 << " | target_hz: " << hz_tag
+                 << (is_takeoff_active ? " | takeoff" : "") << "\n";
+        log_file << "timestamp_ns,dt,raw_baro_alt,gps_alt,ekf_alt,ekf_vel_z,pid_target,pid_out_throttle,"
+                    "gyro_x,gyro_y,gyro_z,acc_x,acc_y,acc_z,"
+                    "ekf_roll_deg,ekf_pitch_deg,ekf_yaw_deg,"
+                    "tgt_roll_deg,tgt_pitch_deg,tgt_yaw_deg,"
+                    "pwm_fr,pwm_rl,pwm_fl,pwm_rr\n";
     }
 
-    // Clear performance log
+    // Clear performance log (+ version header)
     {
         std::ofstream perf_f(perf_log_name, std::ios::out | std::ios::trunc);
+        perf_f << "# run_start: " << run_start_str
+               << " | build: " << __DATE__ << " " << __TIME__
+               << " | target_hz: " << hz_tag << "\n";
         perf_f.close();
     }
 
@@ -482,6 +505,14 @@ int main(int argc, char* argv[]) {
                     float e_vel_z = has_est ? -est.vel_ned[2] : 0.0f;
                     float g_alt = has_gnss ? -gnss_data.pos_ned[2] : 0.0f;
 
+                    // EKF attitude (deg) for dynamic-maneuver verification
+                    float log_r = 0.0f, log_p = 0.0f, log_y = 0.0f;
+                    if (has_est) {
+                        AttitudeUtils::computeEulerDeg(est.quat[0], est.quat[1], est.quat[2], est.quat[3],
+                                                       log_r, log_p, log_y);
+                    }
+                    const float RAD2DEG = 57.2957795f;
+
                     log_file << imu_data.timestamp_ns << ","
                              << dt << ","
                              << current_altitude << ","
@@ -489,7 +520,15 @@ int main(int argc, char* argv[]) {
                              << e_alt << ","
                              << e_vel_z << ","
                              << (float)target_altitude << ","
-                             << pwm_data.pwm_values[0] << "\n";
+                             << pwm_data.pwm_values[0] << ","
+                             << imu_data.gyro[0] << "," << imu_data.gyro[1] << "," << imu_data.gyro[2] << ","
+                             << imu_data.accel[0] << "," << imu_data.accel[1] << "," << imu_data.accel[2] << ","
+                             << log_r << "," << log_p << "," << log_y << ","
+                             << current_target_roll * RAD2DEG << ","
+                             << current_target_pitch * RAD2DEG << ","
+                             << current_target_yaw * RAD2DEG << ","
+                             << pwm_data.pwm_values[0] << "," << pwm_data.pwm_values[1] << ","
+                             << pwm_data.pwm_values[2] << "," << pwm_data.pwm_values[3] << "\n";
 
                     static int log_counter = 0;
                     if (++log_counter >= 1000) {
