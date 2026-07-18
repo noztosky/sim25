@@ -53,6 +53,9 @@ namespace airlib
             else if (connection_info_.model == "Octocopter") {
                 setupFrameGenericOcto(params);
             }
+            else if (connection_info_.model == "EFTZ30") {
+                setupFrameEFTZ30(params);
+            }
             else //Generic
                 setupFrameGenericQuad(params);
         }

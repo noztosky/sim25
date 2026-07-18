@@ -34,10 +34,12 @@ namespace airlib
         {
             auto& params = getParams();
 
-            // Use connection_info_.model for the model name, see Px4MultiRotorParams for example
-
-            // Only Generic for now
-            setupFrameGenericQuad(params);
+            //frame selected via vehicle-level "Model" in settings.json (see Px4MultiRotorParams for the PX4 equivalent)
+            if (vehicle_setting_->model == "EFTZ30") {
+                setupFrameEFTZ30(params);
+            }
+            else //Generic
+                setupFrameGenericQuad(params);
         }
 
         virtual const SensorFactory* getSensorFactory() const override

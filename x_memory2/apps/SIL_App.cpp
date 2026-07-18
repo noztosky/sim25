@@ -38,6 +38,91 @@
 std::ofstream log_file;
 std::atomic<bool> should_exit(false);
 
+// ---- Tunable flight-control parameters (loadable from a params file at startup) ----
+// Lets you tune PID/hover without recompiling: edit the file and rerun SIL_App.
+struct TuneParams {
+    float hover_throttle;
+    // altitude PID
+    float alt_p, alt_i, alt_d, alt_ilim, alt_min, alt_max, alt_dfilt;
+    // roll/pitch rate PID (inner loop)
+    float rate_p, rate_i, rate_d, rate_clamp, rate_ilim, rate_dfilt;
+    // yaw rate PID
+    float yaw_p, yaw_i, yaw_d, yaw_clamp;
+    // outer angle->rate gains
+    float again_roll, again_pitch, again_yaw;
+};
+
+static TuneParams defaultTuneParams(bool is_z30) {
+    TuneParams p{};
+    if (is_z30) {
+        p.hover_throttle = 0.74f;
+        p.alt_p = 0.12f; p.alt_i = 0.03f; p.alt_d = 0.14f; p.alt_ilim = 0.15f; p.alt_min = -0.30f; p.alt_max = 0.10f; p.alt_dfilt = 10.0f;
+        p.rate_p = 0.10f; p.rate_i = 0.02f; p.rate_d = 0.030f; p.rate_clamp = 0.20f; p.rate_ilim = 0.10f; p.rate_dfilt = 20.0f;
+        p.yaw_p = 0.15f; p.yaw_i = 0.05f; p.yaw_d = 0.0f; p.yaw_clamp = 0.15f;
+        p.again_roll = 3.0f; p.again_pitch = 3.0f; p.again_yaw = 1.5f;
+    } else {
+        p.hover_throttle = 0.59f;
+        p.alt_p = 0.18f; p.alt_i = 0.04f; p.alt_d = 0.10f; p.alt_ilim = 0.20f; p.alt_min = -0.25f; p.alt_max = 0.25f; p.alt_dfilt = 10.0f;
+        p.rate_p = 0.08f; p.rate_i = 0.02f; p.rate_d = 0.005f; p.rate_clamp = 0.15f; p.rate_ilim = 0.10f; p.rate_dfilt = 20.0f;
+        p.yaw_p = 0.15f; p.yaw_i = 0.05f; p.yaw_d = 0.0f; p.yaw_clamp = 0.15f;
+        p.again_roll = 4.5f; p.again_pitch = 5.0f; p.again_yaw = 1.5f;
+    }
+    return p;
+}
+
+// Load key=value lines (# comments allowed) from `path`, overriding fields of `p`.
+// Returns number of keys applied (-1 if file could not be opened).
+static int loadTuneParams(const std::string& path, TuneParams& p) {
+    std::ifstream f(path);
+    if (!f.is_open()) return -1;
+    int applied = 0;
+    std::string line;
+    while (std::getline(f, line)) {
+        // strip comments and whitespace
+        size_t hash = line.find('#');
+        if (hash != std::string::npos) line = line.substr(0, hash);
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = line.substr(0, eq);
+        std::string val = line.substr(eq + 1);
+        auto trim = [](std::string& s) {
+            size_t a = s.find_first_not_of(" \t\r\n");
+            size_t b = s.find_last_not_of(" \t\r\n");
+            if (a == std::string::npos) { s.clear(); return; }
+            s = s.substr(a, b - a + 1);
+        };
+        trim(key); trim(val);
+        if (key.empty() || val.empty()) continue;
+        float v;
+        try { v = std::stof(val); } catch (...) { continue; }
+        bool ok = true;
+        if (key == "hover_throttle") p.hover_throttle = v;
+        else if (key == "alt_p") p.alt_p = v;
+        else if (key == "alt_i") p.alt_i = v;
+        else if (key == "alt_d") p.alt_d = v;
+        else if (key == "alt_ilim") p.alt_ilim = v;
+        else if (key == "alt_min") p.alt_min = v;
+        else if (key == "alt_max") p.alt_max = v;
+        else if (key == "alt_dfilt") p.alt_dfilt = v;
+        else if (key == "rate_p") p.rate_p = v;
+        else if (key == "rate_i") p.rate_i = v;
+        else if (key == "rate_d") p.rate_d = v;
+        else if (key == "rate_clamp") p.rate_clamp = v;
+        else if (key == "rate_ilim") p.rate_ilim = v;
+        else if (key == "rate_dfilt") p.rate_dfilt = v;
+        else if (key == "yaw_p") p.yaw_p = v;
+        else if (key == "yaw_i") p.yaw_i = v;
+        else if (key == "yaw_d") p.yaw_d = v;
+        else if (key == "yaw_clamp") p.yaw_clamp = v;
+        else if (key == "again_roll") p.again_roll = v;
+        else if (key == "again_pitch") p.again_pitch = v;
+        else if (key == "again_yaw") p.again_yaw = v;
+        else ok = false;
+        if (ok) ++applied;
+    }
+    return applied;
+}
+
 // Per-sample latency/jitter record (buffered in memory, dumped to perf_log.csv at exit
 // so that disk I/O does not perturb the timing being measured)
 struct PerfSample {
@@ -55,6 +140,10 @@ char g_cmd_axis = '\0';
 float g_cmd_value = 0.0f;
 float g_cmd_duration = 0.0f;
 bool g_new_cmd_received = false;
+
+// Runtime control-flow requests set by the UDP listener, consumed by the main loop
+std::atomic<bool> g_reload_pid_request(false);  // "pid": re-read params file, re-apply gains live
+std::atomic<bool> g_reset_request(false);       // "reset": return to pre-takeoff (reset sim + state)
 
 // UDP Command Server thread function
 void command_listener_thread() {
@@ -102,7 +191,24 @@ void command_listener_thread() {
                                        (SOCKADDR*)&sender_addr, &sender_addr_size);
             if (bytes_recvd > 0) {
                 recv_buf[bytes_recvd] = '\0';
-                
+
+                // Word commands first (no numeric args): "pid" reloads params, "reset" returns to pre-takeoff
+                char word[64] = {0};
+                if (sscanf(recv_buf, " %63s", word) == 1) {
+                    if (_stricmp(word, "pid") == 0) {
+                        g_reload_pid_request = true;
+                        printf("\n[UDP Server] Received command: PID reload\n");
+                        fflush(stdout);
+                        continue;
+                    }
+                    if (_stricmp(word, "reset") == 0) {
+                        g_reset_request = true;
+                        printf("\n[UDP Server] Received command: RESET to pre-takeoff\n");
+                        fflush(stdout);
+                        continue;
+                    }
+                }
+
                 char axis = '\0';
                 float val = 0.0f;
                 float dur = 0.0f;
@@ -145,6 +251,8 @@ int main(int argc, char* argv[]) {
     bool is_takeoff_active = false;
     double target_altitude = 0.0;
     float current_target_alt = 0.0f;
+    std::string frame_profile = "default"; // "default" (1kg quad) or "z30" (40kg agri)
+    std::string params_path = "";          // optional key=value tuning file; empty = auto by profile
 
     // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
@@ -153,6 +261,10 @@ int main(int argc, char* argv[]) {
             target_altitude = std::stod(argv[i + 1]);
             is_takeoff_active = true;
             i++; // skip next argument
+        } else if (arg == "z30" || arg == "Z30" || arg == "eftz30") {
+            frame_profile = "z30";
+        } else if (arg.rfind("params=", 0) == 0) {
+            params_path = arg.substr(7);   // params=<path>
         } else {
             try {
                 target_hz = std::stod(arg);
@@ -161,6 +273,21 @@ int main(int argc, char* argv[]) {
             }
         }
     }
+    const bool is_z30 = (frame_profile == "z30");
+    printf("[SIL_App] Frame profile: %s\n", frame_profile.c_str());
+
+    // Build tuning params: start from profile defaults, then override from file if present.
+    TuneParams tune = defaultTuneParams(is_z30);
+    if (params_path.empty())
+        params_path = is_z30 ? "pid_params_z30.txt" : "pid_params.txt";
+    int applied = loadTuneParams(params_path, tune);
+    if (applied < 0)
+        printf("[SIL_App] Tuning: no params file '%s' -> using built-in %s defaults\n", params_path.c_str(), frame_profile.c_str());
+    else
+        printf("[SIL_App] Tuning: loaded %d keys from '%s' (overriding %s defaults)\n", applied, params_path.c_str(), frame_profile.c_str());
+    printf("[SIL_App] hover=%.3f | alt PID=%.3f/%.3f/%.3f lim[%.2f..%.2f] | rate PID=%.3f/%.3f/%.3f clamp=%.2f | angle-gain r/p/y=%.1f/%.1f/%.1f\n",
+           tune.hover_throttle, tune.alt_p, tune.alt_i, tune.alt_d, tune.alt_min, tune.alt_max,
+           tune.rate_p, tune.rate_i, tune.rate_d, tune.rate_clamp, tune.again_roll, tune.again_pitch, tune.again_yaw);
 
     // --- [Option 2] SHM Mode ---
     printf("[SIL_App] Mode: SHM\n");
@@ -263,25 +390,30 @@ int main(int argc, char* argv[]) {
     act.init(); // This will enable API control and arm the drone
     current_target_alt = (float)target_altitude;
 
-    // Setup PID Controllers
-    PID pid_alt;
-    pid_alt.set_gains(0.18f, 0.04f, 0.10f, 0.0f);
-    pid_alt.set_limits(0.20f, -0.25f, 0.25f); // Limit integration and total correction output
-    pid_alt.set_d_filter_hz(10.0f);
+    // Setup PID Controllers from tuning params (file-loadable + live-reloadable via "pid" command)
+    float att_rate_gain_rp = 0.0f, att_rate_gain_p = 0.0f, att_rate_gain_y = 0.0f;
+    float hover_throttle = 0.0f;
+    PID pid_alt, pid_roll, pid_pitch, pid_yaw;
 
-    PID pid_roll;
-    pid_roll.set_gains(0.08f, 0.02f, 0.005f, 0.0f);
-    pid_roll.set_limits(0.10f, -0.15f, 0.15f);
-    pid_roll.set_d_filter_hz(20.0f);
-
-    PID pid_pitch;
-    pid_pitch.set_gains(0.08f, 0.02f, 0.005f, 0.0f);
-    pid_pitch.set_limits(0.10f, -0.15f, 0.15f);
-    pid_pitch.set_d_filter_hz(20.0f);
-
-    PID pid_yaw;
-    pid_yaw.set_gains(0.15f, 0.05f, 0.0f, 0.0f);
-    pid_yaw.set_limits(0.10f, -0.15f, 0.15f);
+    // Applies a TuneParams to all controllers + gains + hover (used at init and on live reload).
+    auto applyTune = [&](const TuneParams& t) {
+        att_rate_gain_rp = t.again_roll;
+        att_rate_gain_p  = t.again_pitch;
+        att_rate_gain_y  = t.again_yaw;
+        hover_throttle   = t.hover_throttle;
+        pid_alt.set_gains(t.alt_p, t.alt_i, t.alt_d, 0.0f);
+        pid_alt.set_limits(t.alt_ilim, t.alt_min, t.alt_max);
+        pid_alt.set_d_filter_hz(t.alt_dfilt);
+        pid_roll.set_gains(t.rate_p, t.rate_i, t.rate_d, 0.0f);
+        pid_roll.set_limits(t.rate_ilim, -t.rate_clamp, t.rate_clamp);
+        pid_roll.set_d_filter_hz(t.rate_dfilt);
+        pid_pitch.set_gains(t.rate_p, t.rate_i, t.rate_d, 0.0f);
+        pid_pitch.set_limits(t.rate_ilim, -t.rate_clamp, t.rate_clamp);
+        pid_pitch.set_d_filter_hz(t.rate_dfilt);
+        pid_yaw.set_gains(t.yaw_p, t.yaw_i, t.yaw_d, 0.0f);
+        pid_yaw.set_limits(0.10f, -t.yaw_clamp, t.yaw_clamp);
+    };
+    applyTune(tune);
 
     // Target intervals in Nanoseconds
     const uint64_t IMU_TARGET_NS = (uint64_t)(1000000000.0 / target_hz);
@@ -301,7 +433,6 @@ int main(int argc, char* argv[]) {
     uint64_t cmd_end_time_ns = 0;
     char cmd_active_axis = '\0';
     float cmd_active_value = 0.0f;
-    const float hover_throttle = 0.59f; // Base throttle for multirotor to hover (approx 1590us)
     float current_target_roll = 0.0f;
     float current_target_pitch = 0.0f;
     float current_target_yaw = 0.0f;
@@ -469,6 +600,51 @@ int main(int argc, char* argv[]) {
                 EstimatedState est;
                 bool has_est = ekf.get_estimated_state(est);
 
+                // --- Live PID reload ("pid" command): re-read params file, re-apply gains in place ---
+                if (g_reload_pid_request.exchange(false)) {
+                    TuneParams nt = defaultTuneParams(is_z30);
+                    int n = loadTuneParams(params_path, nt);
+                    tune = nt;
+                    applyTune(tune);
+                    printf("[SIL_App] PID reloaded (%d keys from '%s'): hover=%.3f | alt=%.3f/%.3f/%.3f lim[%.2f..%.2f] | rate=%.3f/%.3f/%.3f clamp=%.2f | angle r/p/y=%.1f/%.1f/%.1f\n",
+                           (n < 0 ? 0 : n), params_path.c_str(), tune.hover_throttle,
+                           tune.alt_p, tune.alt_i, tune.alt_d, tune.alt_min, tune.alt_max,
+                           tune.rate_p, tune.rate_i, tune.rate_d, tune.rate_clamp,
+                           tune.again_roll, tune.again_pitch, tune.again_yaw);
+                    fflush(stdout);
+                }
+
+                // --- Reset to pre-takeoff ("reset" command): stop autopilot, zero state, reset sim ---
+                if (g_reset_request.exchange(false)) {
+                    is_takeoff_active = false;
+                    target_altitude = 0.0;
+                    current_target_alt = 0.0f;
+                    current_target_roll = current_target_pitch = current_target_yaw = 0.0f;
+                    cmd_end_time_ns = 0;
+                    cmd_active_axis = '\0';
+                    yaw_ref_set = false;
+                    pid_alt.reset(); pid_roll.reset(); pid_pitch.reset(); pid_yaw.reset();
+                    pwm_data.pwm_values = { 0.5f, 0.5f, 0.5f, 0.5f };
+                    // Reposition the vehicle in the simulator (back to spawn) via RPC
+                    try {
+                        RPC_Driver rpc;
+                        if (rpc.connect()) {
+                            rpc.get_client()->reset();
+                            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                            rpc.get_client()->enableApiControl(true);
+                            rpc.get_client()->armDisarm(true);
+                            rpc.close();
+                            printf("[SIL_App] RESET done: vehicle repositioned, autopilot off, PIDs cleared. Send 'a <alt>' to take off again.\n");
+                        } else {
+                            printf("[SIL_App] RESET (state cleared) but RPC unavailable -> vehicle not repositioned.\n");
+                        }
+                    } catch (const std::exception& e) {
+                        printf("[SIL_App] RESET warning: RPC reset failed: %s\n", e.what());
+                    }
+                    ekf.init(); // re-init estimator after teleport to avoid a transient
+                    fflush(stdout);
+                }
+
                 // Check for new UDP command
                 char active_axis = '\0';
                 float active_value = 0.0f;
@@ -603,9 +779,9 @@ int main(int argc, char* argv[]) {
                     };
                     float yaw_err = wrap_pi(target_yaw - yaw_rad);
 
-                    float target_roll_rate = 4.5f * roll_err;
-                    float target_pitch_rate = 5.0f * pitch_err;
-                    float target_yaw_rate = 1.5f * yaw_err;
+                    float target_roll_rate = att_rate_gain_rp * roll_err;
+                    float target_pitch_rate = att_rate_gain_p * pitch_err;
+                    float target_yaw_rate = att_rate_gain_y * yaw_err;
 
                     // Inner loop: Rate PID
                     float cr = pid_roll.compute(target_roll_rate, (float)imu_data.gyro[0], dt);

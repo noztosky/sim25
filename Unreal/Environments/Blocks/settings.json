@@ -6,6 +6,7 @@
     "Vehicles":  {
                      "SimpleFlight":  {
                                           "VehicleType":  "SimpleFlight",
+                                          "Model":  "EFTZ30",
                                           "DefaultVehicleState":  "Armed",
                                           "EnableCollisionPassthrogh":  false,
                                           "EnableCollisions":  true,
@@ -59,5 +60,5 @@
                                      0.5
                                  ],
     "ClockType":  "SteppableClock",
-    "PhysicsLoopPeriod":  1000000
+    "PhysicsLoopPeriod":  250000
 }

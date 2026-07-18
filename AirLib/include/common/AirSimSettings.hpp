@@ -263,6 +263,7 @@ namespace airlib
             //optional
             std::string default_vehicle_state;
             std::string pawn_path;
+            std::string model; //frame model preset name (e.g. "EFTZ30"), used by non-MavLink vehicles
             bool allow_api_always = true;
             bool auto_create = true;
             bool enable_collision_passthrough = false;
@@ -829,6 +830,7 @@ namespace airlib
 
             //optional settings_json
             vehicle_setting->pawn_path = settings_json.getString("PawnPath", "");
+            vehicle_setting->model = settings_json.getString("Model", "");
             vehicle_setting->default_vehicle_state = settings_json.getString("DefaultVehicleState", "");
             vehicle_setting->allow_api_always = settings_json.getBool("AllowAPIAlways",
                                                                       vehicle_setting->allow_api_always);

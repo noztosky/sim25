@@ -544,6 +544,56 @@ namespace airlib
             computeInertiaMatrix(params.inertia, params.body_box, params.rotor_poses, box_mass, motor_assembly_weight);
         }
 
+        void setupFrameEFTZ30(Params& params)
+        {
+            /*
+            EFT Z30 agricultural quad frame, EMPTY-TANK configuration (tank 0 L, battery installed).
+
+            Manufacturer specs (effort-tech.com Z series):
+              wheelbase 2025 mm (quad-X), 41135 propeller (D = 1.041 m),
+              11115 95KV motor rated 18 kgf/axis on 14S,
+              empty weight 29.8 kg (no battery) + 14S 30000 mAh battery ~10 kg -> 40 kg,
+              max take-off weight 70 kg (30 L tank full).
+            */
+            params.rotor_count = 4;
+            std::vector<real_T> arm_lengths(params.rotor_count, 1.0125f); //wheelbase 2025mm / 2
+
+            params.mass = 40.0f; //empty tank + battery
+            real_T motor_assembly_weight = 1.3f; //11115 motor + 41135 prop + ESC per arm end
+            real_T box_mass = params.mass - params.rotor_count * motor_assembly_weight;
+
+            //Thrust model: keep UIUC C_T/C_P shape coefficients, solve max_rpm so that
+            //C_T * rho * n^2 * D^4 == 18 kgf (176.5 N):  n = 33.4 rev/s -> ~2005 RPM.
+            //Tip speed at max: pi * 1.041 * 33.4 = 109 m/s (Mach 0.32, plausible for 41" prop).
+            params.rotor_params.C_T = 0.109919f;
+            params.rotor_params.C_P = 0.040164f;
+            params.rotor_params.max_rpm = 2005.0f;
+            params.rotor_params.propeller_diameter = 1.041f;
+            params.rotor_params.control_signal_filter_tc = 0.03f; //large prop/ESC spool-up slower than hobby quads (5ms), but >~50ms adds enough attitude-loop phase lag to destabilize pitch/roll
+            params.rotor_params.calculateMaxThrust();
+            //hover check: 40 kg -> 392 N -> 98 N/rotor = 55.6% of 176.5 N max
+
+            //central truss + empty tank + battery envelope (folded body is 979x684x752 mm)
+            params.body_box.x() = 0.75f;
+            params.body_box.y() = 0.60f;
+            params.body_box.z() = 0.50f;
+            real_T rotor_z = 0.05f;
+
+            initializeRotorQuadX(params.rotor_poses, params.rotor_count, arm_lengths.data(), rotor_z);
+
+            //Empty-tank front/rear imbalance: battery sits aft-top while the (empty) tank is
+            //forward-bottom, so the CG sits aft of the geometric frame center. Rotor positions
+            //are defined relative to the CG, so shift every rotor forward by |cg_offset_x|.
+            //-0.05 m (CG 5 cm aft, NED +x = forward) is an estimate - measure on the physical
+            //frame (balance point) and update. Set to 0 for a symmetric baseline run.
+            const real_T cg_offset_x = -0.05f;
+            for (auto& pose : params.rotor_poses)
+                pose.position.x() -= cg_offset_x;
+
+            //compute inertia matrix (uses the CG-shifted rotor arms, so the asymmetry is captured)
+            computeInertiaMatrix(params.inertia, params.body_box, params.rotor_poses, box_mass, motor_assembly_weight);
+        }
+
     private:
         Params params_;
         SensorCollection sensors_; //maintains sensor type indexed collection of sensors

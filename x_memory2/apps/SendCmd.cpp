@@ -6,24 +6,30 @@
 #pragma comment(lib, "ws2_32.lib")
 
 int main(int argc, char* argv[]) {
-    if (argc < 4) {
+    std::string command;
+
+    // Word commands (no numeric args): pid = reload params, reset = return to pre-takeoff
+    if (argc == 2 && (std::string(argv[1]) == "pid" || std::string(argv[1]) == "reset")) {
+        command = argv[1];
+    }
+    else if (argc >= 4) {
+        std::string axis = argv[1];
+        std::string value = argv[2];
+        std::string duration = argv[3];
+        if (axis != "r" && axis != "p" && axis != "y" && axis != "a") {
+            std::cerr << "Error: Axis must be 'r' (roll), 'p' (pitch), 'y' (yaw), or 'a' (altitude).\n";
+            return 1;
+        }
+        command = axis + " " + value + " " + duration;
+    }
+    else {
         std::cerr << "Usage: SendCmd <axis: r|p|y|a> <value: deg/m> <duration: sec>\n";
-        std::cerr << "Example: SendCmd r 30 1\n";
-        std::cerr << "         SendCmd a 5 10\n";
+        std::cerr << "   or: SendCmd pid      (reload PID params from file, live)\n";
+        std::cerr << "   or: SendCmd reset    (return to pre-takeoff: reposition + clear state)\n";
+        std::cerr << "Example: SendCmd a 5 10\n";
+        std::cerr << "         SendCmd r 30 1\n";
         return 1;
     }
-
-    std::string axis = argv[1];
-    std::string value = argv[2];
-    std::string duration = argv[3];
-
-    // Basic input validation
-    if (axis != "r" && axis != "p" && axis != "y" && axis != "a") {
-        std::cerr << "Error: Axis must be 'r' (roll), 'p' (pitch), 'y' (yaw), or 'a' (altitude).\n";
-        return 1;
-    }
-
-    std::string command = axis + " " + value + " " + duration;
 
     // Initialize Winsock
     WSADATA wsaData;
