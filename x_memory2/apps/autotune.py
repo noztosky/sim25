@@ -312,11 +312,21 @@ def main():
     x0 = np.array([x for *_, x in tuned], dtype=float)
     bounds = [(lo, hi) for _, lo, hi, _ in tuned]
 
+    # Wide initial simplex so Nelder-Mead actually EXPLORES (default step ~5% of x0 is
+    # far too small for these small-magnitude gains -> it stalls at the start point).
+    steps = np.array([0.4 * (hi - lo) for _, lo, hi, _ in tuned])
+    simplex = [x0.copy()]
+    for i in range(len(x0)):
+        v = x0.copy()
+        v[i] = min(bounds[i][1], max(bounds[i][0], x0[i] + steps[i]))
+        simplex.append(v)
+    simplex = np.array(simplex)
+
     print(f"[autotune] phase={args.phase}  AltHold step-response tuning  "
-          f"({len(tuned)}D, up to {args.evals} evals x{args.repeat} rep)", flush=True)
+          f"({len(tuned)}D, up to {args.evals} evals x{args.repeat} rep, wide simplex)", flush=True)
     try:
         minimize(tuner.objective, x0, method="Nelder-Mead", bounds=bounds,
-                 options=dict(maxfev=args.evals, xatol=1e-3, fatol=1e-2))
+                 options=dict(maxfev=args.evals, xatol=1e-3, fatol=1e-2, initial_simplex=simplex))
     except KeyboardInterrupt:
         print("\n[autotune] interrupted", flush=True)
 

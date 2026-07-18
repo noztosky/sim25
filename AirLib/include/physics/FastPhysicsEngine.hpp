@@ -672,10 +672,10 @@ namespace airlib
                 // The flight controller (IMU) is mounted r_fc FORWARD of the CG, not at the CG.
                 // An accelerometer at an offset reads a_fc = a_cg + w_dot x r + w x (w x r).
                 // (Gyro is unchanged: angular velocity is identical everywhere on a rigid body.)
-                // r_fc = 0.30 m forward of the geometric frame center + 0.10 m (the center sits
-                // 0.10 m ahead of the CG since cg_offset_x = -0.10) = 0.40 m ahead of CG, body +x.
+                // r_fc = 0.30 m forward of the geometric frame center + 0.20 m (the center sits
+                // 0.20 m ahead of the CG since cg_offset_x = -0.20) = 0.50 m ahead of CG, body +x.
                 // Whole reported state (accel + position + velocity) is expressed at the FC point.
-                const Vector3r r_fc(0.40f, 0.0f, 0.0f);
+                const Vector3r r_fc(0.50f, 0.0f, 0.0f);
                 {
                     static Vector3r s_last_w(0, 0, 0);
                     static double s_last_w_t = 0.0;

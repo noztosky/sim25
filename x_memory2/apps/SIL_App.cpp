@@ -1000,12 +1000,13 @@ int main(int argc, char* argv[]) {
                     if (flight_mode == 1 && has_est) {
                         // ===== LOITER: GPS horizontal position/velocity hold =====
                         const float G = 9.81f;
-                        const float LOI_MAXVEL = 4.0f;       // m/s max commanded speed
+                        const float LOI_MAXVEL = 8.0f;       // m/s max commanded speed (raised so full
+                                                             // stick can drive up to the 30 deg tilt cap)
                         const float LOI_POS_P = 0.25f;       // position error -> desired velocity (gentle)
                         const float LOI_VEL_P = 1.0f;        // velocity error -> accel (gentle: outer loop
                                                              // must be far slower than the attitude loop)
-                        const float LOI_MAXTILT = 0.12f;     // ~7 deg cap on loiter-commanded tilt
-                        const float PILOT_TILT_REF = 0.21f;  // tilt cmd (rad) mapping to LOI_MAXVEL
+                        const float LOI_MAXTILT = 0.52f;     // ~30 deg cap on loiter-commanded tilt
+                        const float PILOT_TILT_REF = 0.52f;  // full stick (30 deg cmd) -> LOI_MAXVEL
 
                         float posN = (float)est.pos_ned[0], posE = (float)est.pos_ned[1];
                         float velN = (float)est.vel_ned[0], velE = (float)est.vel_ned[1];
