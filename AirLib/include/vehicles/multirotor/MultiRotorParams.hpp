@@ -584,9 +584,9 @@ namespace airlib
             //Empty-tank front/rear imbalance: battery sits aft-top while the (empty) tank is
             //forward-bottom, so the CG sits aft of the geometric frame center. Rotor positions
             //are defined relative to the CG, so shift every rotor forward by |cg_offset_x|.
-            //-0.05 m (CG 5 cm aft, NED +x = forward) is an estimate - measure on the physical
+            //-0.10 m (CG 10 cm aft, NED +x = forward) is an estimate - measure on the physical
             //frame (balance point) and update. Set to 0 for a symmetric baseline run.
-            const real_T cg_offset_x = -0.05f;
+            const real_T cg_offset_x = -0.10f;
             for (auto& pose : params.rotor_poses)
                 pose.position.x() -= cg_offset_x;
 

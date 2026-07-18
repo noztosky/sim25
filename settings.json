@@ -60,5 +60,5 @@
                                      0.5
                                  ],
     "ClockType":  "SteppableClock",
-    "PhysicsLoopPeriod":  250000
+    "PhysicsLoopPeriod":  1000000
 }

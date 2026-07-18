@@ -38,6 +38,19 @@
 std::ofstream log_file;
 std::atomic<bool> should_exit(false);
 
+// --- Ground-truth (physics) feedback probe -------------------------------------
+// When enabled with the `gt` arg, a low-rate thread polls AirSim RPC for the TRUE
+// body attitude + angular velocity, published here so every flight-log row can
+// compare three signals side by side:
+//   raw SHM gyro (what the app receives)  vs  EKF estimate  vs  TRUE physics.
+// Purpose: tell apart a sensor/SHM bug (true rate large but SHM gyro ~0) from an
+// estimator bug (true attitude level but EKF says flipped). Off the control loop.
+std::atomic<bool>  g_gt_enabled(false);
+std::atomic<bool>  g_gt_valid(false);
+std::atomic<float> g_gt_roll(0.0f), g_gt_pitch(0.0f), g_gt_yaw(0.0f);   // deg, from TRUE quaternion
+std::atomic<float> g_gt_gx(0.0f), g_gt_gy(0.0f), g_gt_gz(0.0f);         // rad/s, TRUE angular velocity
+std::atomic<float> g_gt_posN(0.0f), g_gt_posE(0.0f);                    // m, TRUE horizontal position (NED)
+
 // ---- Tunable flight-control parameters (loadable from a params file at startup) ----
 // Lets you tune PID/hover without recompiling: edit the file and rerun SIL_App.
 struct TuneParams {
@@ -50,6 +63,8 @@ struct TuneParams {
     float yaw_p, yaw_i, yaw_d, yaw_clamp;
     // outer angle->rate gains
     float again_roll, again_pitch, again_yaw;
+    // pitch feedforward trim for CG offset compensation
+    float pitch_trim;
 };
 
 static TuneParams defaultTuneParams(bool is_z30) {
@@ -60,18 +75,21 @@ static TuneParams defaultTuneParams(bool is_z30) {
         p.rate_p = 0.10f; p.rate_i = 0.02f; p.rate_d = 0.030f; p.rate_clamp = 0.20f; p.rate_ilim = 0.10f; p.rate_dfilt = 20.0f;
         p.yaw_p = 0.15f; p.yaw_i = 0.05f; p.yaw_d = 0.0f; p.yaw_clamp = 0.15f;
         p.again_roll = 3.0f; p.again_pitch = 3.0f; p.again_yaw = 1.5f;
+        p.pitch_trim = 0.076f;
     } else {
         p.hover_throttle = 0.59f;
         p.alt_p = 0.18f; p.alt_i = 0.04f; p.alt_d = 0.10f; p.alt_ilim = 0.20f; p.alt_min = -0.25f; p.alt_max = 0.25f; p.alt_dfilt = 10.0f;
         p.rate_p = 0.08f; p.rate_i = 0.02f; p.rate_d = 0.005f; p.rate_clamp = 0.15f; p.rate_ilim = 0.10f; p.rate_dfilt = 20.0f;
         p.yaw_p = 0.15f; p.yaw_i = 0.05f; p.yaw_d = 0.0f; p.yaw_clamp = 0.15f;
         p.again_roll = 4.5f; p.again_pitch = 5.0f; p.again_yaw = 1.5f;
+        p.pitch_trim = 0.0f;
     }
     return p;
 }
 
 // Load key=value lines (# comments allowed) from `path`, overriding fields of `p`.
 // Returns number of keys applied (-1 if file could not be opened).
+// In std::stof, catch all exceptions to continue safely.
 static int loadTuneParams(const std::string& path, TuneParams& p) {
     std::ifstream f(path);
     if (!f.is_open()) return -1;
@@ -117,6 +135,7 @@ static int loadTuneParams(const std::string& path, TuneParams& p) {
         else if (key == "again_roll") p.again_roll = v;
         else if (key == "again_pitch") p.again_pitch = v;
         else if (key == "again_yaw") p.again_yaw = v;
+        else if (key == "pitch_trim") p.pitch_trim = v;
         else ok = false;
         if (ok) ++applied;
     }
@@ -140,6 +159,17 @@ char g_cmd_axis = '\0';
 float g_cmd_value = 0.0f;
 float g_cmd_duration = 0.0f;
 bool g_new_cmd_received = false;
+
+// Combined multi-axis piloting command "c <roll_deg> <pitch_deg> <yaw_off_deg> <dur>":
+// sets roll+pitch+yaw setpoints simultaneously for <dur> seconds. Used by the GUI
+// piloting tab so the mouse stick / keyboard can command diagonal motion (the single
+// r/p/y commands only hold one axis at a time).
+bool g_cmb_new = false;
+float g_cmb_roll = 0.0f, g_cmb_pitch = 0.0f, g_cmb_yaw = 0.0f, g_cmb_dur = 0.0f;
+
+// Flight mode: 0 = ALTHOLD (manual attitude, altitude held), 1 = LOITER (GPS
+// horizontal position hold + altitude). Set via "mode <althold|loiter>". Default LOITER.
+std::atomic<int> g_mode_request(-1);   // -1 none, else new mode requested by UDP
 
 // Runtime control-flow requests set by the UDP listener, consumed by the main loop
 std::atomic<bool> g_reload_pid_request(false);  // "pid": re-read params file, re-apply gains live
@@ -207,6 +237,26 @@ void command_listener_thread() {
                         fflush(stdout);
                         continue;
                     }
+                    if (_stricmp(word, "mode") == 0) {
+                        char m2[64] = {0};
+                        if (sscanf(recv_buf, " %*s %63s", m2) == 1) {
+                            if (_stricmp(m2, "loiter") == 0) { g_mode_request = 1; printf("\n[UDP Server] Mode -> LOITER\n"); }
+                            else if (_stricmp(m2, "althold") == 0 || _stricmp(m2, "alt") == 0) { g_mode_request = 0; printf("\n[UDP Server] Mode -> ALTHOLD\n"); }
+                            fflush(stdout);
+                        }
+                        continue;
+                    }
+                }
+
+                // Combined piloting command: "c <roll> <pitch> <yaw_off> <dur>" (all deg/sec)
+                char caxis = '\0';
+                float cr = 0, cp = 0, cy = 0, cd = 0;
+                if (sscanf(recv_buf, " %c %f %f %f %f", &caxis, &cr, &cp, &cy, &cd) == 5 &&
+                    (caxis == 'c' || caxis == 'C')) {
+                    std::lock_guard<std::mutex> lock(g_cmd_mutex);
+                    g_cmb_roll = cr; g_cmb_pitch = cp; g_cmb_yaw = cy; g_cmb_dur = cd;
+                    g_cmb_new = true;
+                    continue;   // don't also parse as a single-axis command
                 }
 
                 char axis = '\0';
@@ -233,6 +283,38 @@ void command_listener_thread() {
 
     closesocket(recv_socket);
     printf("[UDP Server] Command listener thread stopped.\n");
+}
+
+// Low-rate ground-truth poller (own RPC connection, ~50 Hz). Kept entirely off the
+// control loop so RPC latency never perturbs timing. Publishes to the g_gt_* atomics.
+void gt_poll_thread() {
+    RPC_Driver rpc;
+    bool connected = false;
+    while (!should_exit) {
+        if (!connected) {
+            connected = rpc.connect();
+            if (!connected) { g_gt_valid = false; std::this_thread::sleep_for(std::chrono::milliseconds(500)); continue; }
+        }
+        try {
+            auto k = rpc.get_client()->simGetGroundTruthKinematics();
+            float r, p, y;
+            AttitudeUtils::computeEulerDeg((float)k.pose.orientation.w(), (float)k.pose.orientation.x(),
+                                           (float)k.pose.orientation.y(), (float)k.pose.orientation.z(), r, p, y);
+            g_gt_roll = r; g_gt_pitch = p; g_gt_yaw = y;
+            g_gt_gx = (float)k.twist.angular.x();
+            g_gt_gy = (float)k.twist.angular.y();
+            g_gt_gz = (float)k.twist.angular.z();
+            g_gt_posN = (float)k.pose.position.x();
+            g_gt_posE = (float)k.pose.position.y();
+            g_gt_valid = true;
+        } catch (const std::exception&) {
+            g_gt_valid = false; connected = false; rpc.close();
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            continue;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20)); // ~50 Hz
+    }
+    rpc.close();
 }
 
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
@@ -263,6 +345,8 @@ int main(int argc, char* argv[]) {
             i++; // skip next argument
         } else if (arg == "z30" || arg == "Z30" || arg == "eftz30") {
             frame_profile = "z30";
+        } else if (arg == "gt" || arg == "GT") {
+            g_gt_enabled = true;
         } else if (arg.rfind("params=", 0) == 0) {
             params_path = arg.substr(7);   // params=<path>
         } else {
@@ -273,6 +357,45 @@ int main(int argc, char* argv[]) {
             }
         }
     }
+
+    // Auto-detect profile and hz from settings.json if not explicitly specified via command line arguments
+    if (argc <= 1) {
+        std::vector<std::string> settings_paths = {
+            "../../settings.json",
+            "../settings.json",
+            "settings.json"
+        };
+        for (const auto& path : settings_paths) {
+            std::ifstream sf(path);
+            if (sf.is_open()) {
+                std::string content((std::istreambuf_iterator<char>(sf)), std::istreambuf_iterator<char>());
+                // Check for "Model": "EFTZ30"
+                if (content.find("\"Model\"") != std::string::npos && 
+                    (content.find("\"EFTZ30\"") != std::string::npos || content.find("\"eftz30\"") != std::string::npos)) {
+                    frame_profile = "z30";
+                    printf("[SIL_App] Auto-detected Model: EFTZ30 from %s\n", path.c_str());
+                }
+                // Check for "PhysicsLoopPeriod"
+                size_t pos = content.find("\"PhysicsLoopPeriod\"");
+                if (pos != std::string::npos) {
+                    size_t colon = content.find(":", pos);
+                    if (colon != std::string::npos) {
+                        size_t end = content.find_first_of(",}", colon);
+                        std::string val_str = content.substr(colon + 1, end - colon - 1);
+                        try {
+                            int period = std::stoi(val_str);
+                            if (period > 0) {
+                                target_hz = 1000000000.0 / period;
+                                printf("[SIL_App] Auto-detected PhysicsLoopPeriod from %s: %d -> target_hz: %.0f\n", path.c_str(), period, target_hz);
+                            }
+                        } catch (...) {}
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     const bool is_z30 = (frame_profile == "z30");
     printf("[SIL_App] Frame profile: %s\n", frame_profile.c_str());
 
@@ -280,11 +403,32 @@ int main(int argc, char* argv[]) {
     TuneParams tune = defaultTuneParams(is_z30);
     if (params_path.empty())
         params_path = is_z30 ? "pid_params_z30.txt" : "pid_params.txt";
-    int applied = loadTuneParams(params_path, tune);
+
+    std::string resolved_params_path = params_path;
+    {
+        std::ifstream check_f(resolved_params_path);
+        if (!check_f.is_open()) {
+            std::vector<std::string> alt_paths = {
+                "build/" + params_path,
+                "../build/" + params_path,
+                "apps/" + params_path,
+                "../" + params_path
+            };
+            for (const auto& alt_p : alt_paths) {
+                std::ifstream alt_f(alt_p);
+                if (alt_f.is_open()) {
+                    resolved_params_path = alt_p;
+                    break;
+                }
+            }
+        }
+    }
+
+    int applied = loadTuneParams(resolved_params_path, tune);
     if (applied < 0)
-        printf("[SIL_App] Tuning: no params file '%s' -> using built-in %s defaults\n", params_path.c_str(), frame_profile.c_str());
+        printf("[SIL_App] Tuning: no params file '%s' -> using built-in %s defaults\n", resolved_params_path.c_str(), frame_profile.c_str());
     else
-        printf("[SIL_App] Tuning: loaded %d keys from '%s' (overriding %s defaults)\n", applied, params_path.c_str(), frame_profile.c_str());
+        printf("[SIL_App] Tuning: loaded %d keys from '%s' (overriding %s defaults)\n", applied, resolved_params_path.c_str(), frame_profile.c_str());
     printf("[SIL_App] hover=%.3f | alt PID=%.3f/%.3f/%.3f lim[%.2f..%.2f] | rate PID=%.3f/%.3f/%.3f clamp=%.2f | angle-gain r/p/y=%.1f/%.1f/%.1f\n",
            tune.hover_throttle, tune.alt_p, tune.alt_i, tune.alt_d, tune.alt_min, tune.alt_max,
            tune.rate_p, tune.rate_i, tune.rate_d, tune.rate_clamp, tune.again_roll, tune.again_pitch, tune.again_yaw);
@@ -318,6 +462,11 @@ int main(int argc, char* argv[]) {
 
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
     std::thread cmd_thread(command_listener_thread);
+    std::thread gt_thread;
+    if (g_gt_enabled) {
+        gt_thread = std::thread(gt_poll_thread);
+        printf("[SIL_App] Ground-truth feedback probe ENABLED (RPC ~50Hz) -> extra gt_* columns in flight log\n");
+    }
 
     // Version header: run start + build (compile) timestamp so each log/console
     // self-identifies which binary and settings produced it.
@@ -342,7 +491,8 @@ int main(int argc, char* argv[]) {
                     "gyro_x,gyro_y,gyro_z,acc_x,acc_y,acc_z,"
                     "ekf_roll_deg,ekf_pitch_deg,ekf_yaw_deg,"
                     "tgt_roll_deg,tgt_pitch_deg,tgt_yaw_deg,"
-                    "pwm_fr,pwm_rl,pwm_fl,pwm_rr\n";
+                    "pwm_fr,pwm_rl,pwm_fl,pwm_rr,"
+                    "gt_roll_deg,gt_pitch_deg,gt_yaw_deg,gt_gyro_x,gt_gyro_y,gt_gyro_z,gt_pos_n,gt_pos_e\n";
     }
 
     // Clear performance log (+ version header)
@@ -393,6 +543,7 @@ int main(int argc, char* argv[]) {
     // Setup PID Controllers from tuning params (file-loadable + live-reloadable via "pid" command)
     float att_rate_gain_rp = 0.0f, att_rate_gain_p = 0.0f, att_rate_gain_y = 0.0f;
     float hover_throttle = 0.0f;
+    float pitch_trim = 0.0f;
     PID pid_alt, pid_roll, pid_pitch, pid_yaw;
 
     // Applies a TuneParams to all controllers + gains + hover (used at init and on live reload).
@@ -401,6 +552,7 @@ int main(int argc, char* argv[]) {
         att_rate_gain_p  = t.again_pitch;
         att_rate_gain_y  = t.again_yaw;
         hover_throttle   = t.hover_throttle;
+        pitch_trim       = t.pitch_trim;
         pid_alt.set_gains(t.alt_p, t.alt_i, t.alt_d, 0.0f);
         pid_alt.set_limits(t.alt_ilim, t.alt_min, t.alt_max);
         pid_alt.set_d_filter_hz(t.alt_dfilt);
@@ -421,10 +573,14 @@ int main(int argc, char* argv[]) {
 
     IMUData imu_data;
     PWMData pwm_data;
-    pwm_data.pwm_values = { 0.5f, 0.5f, 0.5f, 0.5f }; // Default Neutral
+    pwm_data.pwm_values = { 0.0f, 0.0f, 0.0f, 0.0f }; // Zero thrust when disarmed
 
     uint64_t last_imu_ts = 0;
     uint64_t last_pwm_send_ts = 0;
+    uint64_t last_ekf_gnss_ts = 0;
+    uint64_t last_ekf_baro_ts = 0;
+    uint64_t last_ekf_mag_ts = 0;
+    int ignore_sensor_frames = 0;
 
     bool yaw_ref_set = false;
     float yaw_ref_rad = 0.0f;
@@ -436,6 +592,15 @@ int main(int argc, char* argv[]) {
     float current_target_roll = 0.0f;
     float current_target_pitch = 0.0f;
     float current_target_yaw = 0.0f;
+
+    // Combined piloting command state (roll/pitch/yaw held together, radians)
+    uint64_t cmb_end_time_ns = 0;
+    float cmb_roll_rad = 0.0f, cmb_pitch_rad = 0.0f, cmb_yaw_rad = 0.0f;
+
+    // Flight mode + Loiter (horizontal position hold) state
+    int flight_mode = 1;              // default LOITER
+    bool loi_valid = false;           // has a loiter target been captured?
+    float loi_tgt_N = 0.0f, loi_tgt_E = 0.0f;
 
     // Statistics via PerfStats class
     PerfStats stats;
@@ -476,6 +641,20 @@ int main(int argc, char* argv[]) {
             YieldProcessor();
         }
         if (!success) continue;
+
+        if (ignore_sensor_frames > 0) {
+            ignore_sensor_frames--;
+            pwm_data.pwm_values = { 0.0f, 0.0f, 0.0f, 0.0f };
+            act.write(pwm_data);
+            continue;
+        }
+
+        // Guard against non-finite values (NaN, Inf) in IMU telemetry (e.g. during reset transition)
+        if (!std::isfinite(imu_data.accel[0]) || !std::isfinite(imu_data.accel[1]) || !std::isfinite(imu_data.accel[2]) ||
+            !std::isfinite(imu_data.gyro[0]) || !std::isfinite(imu_data.gyro[1]) || !std::isfinite(imu_data.gyro[2]) ||
+            !std::isfinite(imu_data.mag[0]) || !std::isfinite(imu_data.mag[1]) || !std::isfinite(imu_data.mag[2])) {
+            continue;
+        }
 
         auto t_imu_end = std::chrono::steady_clock::now();
 
@@ -586,15 +765,33 @@ int main(int argc, char* argv[]) {
                 bool has_gnss = gnss.read(gnss_data);
                 bool has_baro = baro.read(baro_data);
 
-                // Fuse GNSS and Barometer updates in EKF
+                // Check for non-finite values (NaN, Inf) in GNSS
+                if (has_gnss) {
+                    if (!std::isfinite(gnss_data.pos_ned[0]) || !std::isfinite(gnss_data.pos_ned[1]) || !std::isfinite(gnss_data.pos_ned[2]) ||
+                        !std::isfinite(gnss_data.vel_ned[0]) || !std::isfinite(gnss_data.vel_ned[1]) || !std::isfinite(gnss_data.vel_ned[2]) ||
+                        !std::isfinite(gnss_data.lat) || !std::isfinite(gnss_data.lon) || !std::isfinite(gnss_data.alt)) {
+                        has_gnss = false;
+                    }
+                }
+
+                // Check for non-finite values (NaN, Inf) in Baro
+                if (has_baro) {
+                    if (!std::isfinite(baro_data.altitude) || !std::isfinite(baro_data.pressure) || !std::isfinite(baro_data.temperature)) {
+                        has_baro = false;
+                    }
+                }
+
+                // Fuse GNSS and Barometer updates in EKF (natively downsampled by sensor API to 10 Hz and 50 Hz)
                 if (has_gnss) {
                     ekf.update_gnss(gnss_data);
                 }
                 if (has_baro) {
                     ekf.update_baro(baro_data);
                 }
-                if (imu_data.mag[0] != 0.0 || imu_data.mag[1] != 0.0 || imu_data.mag[2] != 0.0) {
+                if ((imu_data.mag[0] != 0.0 || imu_data.mag[1] != 0.0 || imu_data.mag[2] != 0.0) &&
+                    (imu_data.timestamp_ns - last_ekf_mag_ts >= 20000000ULL)) { // 50 Hz
                     ekf.update_mag(imu_data.mag);
+                    last_ekf_mag_ts = imu_data.timestamp_ns;
                 }
 
                 EstimatedState est;
@@ -603,11 +800,11 @@ int main(int argc, char* argv[]) {
                 // --- Live PID reload ("pid" command): re-read params file, re-apply gains in place ---
                 if (g_reload_pid_request.exchange(false)) {
                     TuneParams nt = defaultTuneParams(is_z30);
-                    int n = loadTuneParams(params_path, nt);
+                    int n = loadTuneParams(resolved_params_path, nt);
                     tune = nt;
                     applyTune(tune);
                     printf("[SIL_App] PID reloaded (%d keys from '%s'): hover=%.3f | alt=%.3f/%.3f/%.3f lim[%.2f..%.2f] | rate=%.3f/%.3f/%.3f clamp=%.2f | angle r/p/y=%.1f/%.1f/%.1f\n",
-                           (n < 0 ? 0 : n), params_path.c_str(), tune.hover_throttle,
+                           (n < 0 ? 0 : n), resolved_params_path.c_str(), tune.hover_throttle,
                            tune.alt_p, tune.alt_i, tune.alt_d, tune.alt_min, tune.alt_max,
                            tune.rate_p, tune.rate_i, tune.rate_d, tune.rate_clamp,
                            tune.again_roll, tune.again_pitch, tune.again_yaw);
@@ -622,9 +819,11 @@ int main(int argc, char* argv[]) {
                     current_target_roll = current_target_pitch = current_target_yaw = 0.0f;
                     cmd_end_time_ns = 0;
                     cmd_active_axis = '\0';
+                    cmb_end_time_ns = 0;
+                    loi_valid = false;
                     yaw_ref_set = false;
                     pid_alt.reset(); pid_roll.reset(); pid_pitch.reset(); pid_yaw.reset();
-                    pwm_data.pwm_values = { 0.5f, 0.5f, 0.5f, 0.5f };
+                    pwm_data.pwm_values = { 0.0f, 0.0f, 0.0f, 0.0f };
                     // Reposition the vehicle in the simulator (back to spawn) via RPC
                     try {
                         RPC_Driver rpc;
@@ -642,7 +841,22 @@ int main(int argc, char* argv[]) {
                         printf("[SIL_App] RESET warning: RPC reset failed: %s\n", e.what());
                     }
                     ekf.init(); // re-init estimator after teleport to avoid a transient
+                    ignore_sensor_frames = 200;
+                    last_ekf_gnss_ts = 0;
+                    last_ekf_baro_ts = 0;
+                    last_ekf_mag_ts = 0;
                     fflush(stdout);
+                }
+
+                // Flight-mode switch request
+                {
+                    int mreq = g_mode_request.exchange(-1);
+                    if (mreq == 0 || mreq == 1) {
+                        flight_mode = mreq;
+                        loi_valid = false;   // recapture loiter target on (re)entry
+                        printf("[Autopilot] Flight mode: %s\n", flight_mode == 1 ? "LOITER" : "ALTHOLD");
+                        fflush(stdout);
+                    }
                 }
 
                 // Check for new UDP command
@@ -672,7 +886,24 @@ int main(int argc, char* argv[]) {
                         cmd_active_value = active_value * 0.01745329f; // Convert degrees to radians
                     }
                 }
-                
+
+                // Consume combined piloting command (roll/pitch/yaw held simultaneously)
+                bool got_cmb = false;
+                float cmb_r = 0, cmb_p = 0, cmb_y = 0, cmb_d = 0;
+                {
+                    std::lock_guard<std::mutex> lock(g_cmd_mutex);
+                    if (g_cmb_new) {
+                        cmb_r = g_cmb_roll; cmb_p = g_cmb_pitch; cmb_y = g_cmb_yaw; cmb_d = g_cmb_dur;
+                        g_cmb_new = false; got_cmb = true;
+                    }
+                }
+                if (got_cmb) {
+                    cmb_roll_rad = cmb_r * 0.01745329f;
+                    cmb_pitch_rad = cmb_p * 0.01745329f;
+                    cmb_yaw_rad = cmb_y * 0.01745329f;
+                    cmb_end_time_ns = imu_data.timestamp_ns + static_cast<uint64_t>(cmb_d * 1e9);
+                }
+
                 float current_altitude = has_baro ? (float)baro_data.altitude : 0.0f;
 
                 // Log state to CSV
@@ -704,7 +935,10 @@ int main(int argc, char* argv[]) {
                              << current_target_pitch * RAD2DEG << ","
                              << current_target_yaw * RAD2DEG << ","
                              << pwm_data.pwm_values[0] << "," << pwm_data.pwm_values[1] << ","
-                             << pwm_data.pwm_values[2] << "," << pwm_data.pwm_values[3] << "\n";
+                             << pwm_data.pwm_values[2] << "," << pwm_data.pwm_values[3] << ","
+                             << g_gt_roll.load() << "," << g_gt_pitch.load() << "," << g_gt_yaw.load() << ","
+                             << g_gt_gx.load() << "," << g_gt_gy.load() << "," << g_gt_gz.load() << ","
+                             << g_gt_posN.load() << "," << g_gt_posE.load() << "\n";
 
                     static int log_counter = 0;
                     if (++log_counter >= 1000) {
@@ -727,6 +961,12 @@ int main(int argc, char* argv[]) {
                     float roll_deg = 0.0f, pitch_deg = 0.0f, yaw_deg = 0.0f;
                     AttitudeUtils::computeEulerDeg(qw, qx, qy, qz, roll_deg, pitch_deg, yaw_deg);
 
+                    // Auto-reset if flipped over (Roll or Pitch magnitude > 75 degrees)
+                    if (std::abs(roll_deg) > 75.0f || std::abs(pitch_deg) > 75.0f) {
+                        printf("\n[Autopilot] EMERGENCY: Drone flipped over (Roll=%.1f, Pitch=%.1f). Triggering auto-reset...\n", roll_deg, pitch_deg);
+                        g_reset_request = true;
+                    }
+
                     float roll_rad = roll_deg * 0.01745329f;
                     float pitch_rad = pitch_deg * 0.01745329f;
                     float yaw_rad = yaw_deg * 0.01745329f;
@@ -736,23 +976,72 @@ int main(int argc, char* argv[]) {
                         yaw_ref_set = true;
                     }
 
-                    // Default setpoints
-                    current_target_roll = 0.0f;
-                    current_target_pitch = 0.0f;
-                    current_target_yaw = yaw_ref_rad;
+                    // --- Pilot command extraction (roll/pitch/yaw + altitude) ---
+                    float pilot_roll = 0.0f, pilot_pitch = 0.0f;
+                    float pilot_yaw = yaw_ref_rad;
+                    bool pilot_moving = false;
                     current_target_alt = (float)target_altitude;
 
-                    // Apply command override if within duration
                     if (imu_data.timestamp_ns < cmd_end_time_ns) {
-                        if (cmd_active_axis == 'r') {
-                            current_target_roll = cmd_active_value;
-                        } else if (cmd_active_axis == 'p') {
-                            current_target_pitch = cmd_active_value;
-                        } else if (cmd_active_axis == 'y') {
-                            current_target_yaw = yaw_ref_rad + cmd_active_value;
-                        } else if (cmd_active_axis == 'a') {
-                            current_target_alt = cmd_active_value;
+                        if (cmd_active_axis == 'r') { pilot_roll = cmd_active_value; pilot_moving = true; }
+                        else if (cmd_active_axis == 'p') { pilot_pitch = cmd_active_value; pilot_moving = true; }
+                        else if (cmd_active_axis == 'y') { pilot_yaw = yaw_ref_rad + cmd_active_value; }
+                        else if (cmd_active_axis == 'a') { current_target_alt = cmd_active_value; }
+                    }
+                    if (imu_data.timestamp_ns < cmb_end_time_ns) {
+                        pilot_roll = cmb_roll_rad; pilot_pitch = cmb_pitch_rad;
+                        pilot_yaw = yaw_ref_rad + cmb_yaw_rad;
+                        if (std::abs(cmb_roll_rad) > 0.017f || std::abs(cmb_pitch_rad) > 0.017f)
+                            pilot_moving = true;
+                    }
+
+                    current_target_yaw = pilot_yaw;
+
+                    if (flight_mode == 1 && has_est) {
+                        // ===== LOITER: GPS horizontal position/velocity hold =====
+                        const float G = 9.81f;
+                        const float LOI_MAXVEL = 4.0f;       // m/s max commanded speed
+                        const float LOI_POS_P = 0.25f;       // position error -> desired velocity (gentle)
+                        const float LOI_VEL_P = 1.0f;        // velocity error -> accel (gentle: outer loop
+                                                             // must be far slower than the attitude loop)
+                        const float LOI_MAXTILT = 0.12f;     // ~7 deg cap on loiter-commanded tilt
+                        const float PILOT_TILT_REF = 0.21f;  // tilt cmd (rad) mapping to LOI_MAXVEL
+
+                        float posN = (float)est.pos_ned[0], posE = (float)est.pos_ned[1];
+                        float velN = (float)est.vel_ned[0], velE = (float)est.vel_ned[1];
+                        float yc = cosf(yaw_rad), ys = sinf(yaw_rad);
+
+                        if (!loi_valid) { loi_tgt_N = posN; loi_tgt_E = posE; loi_valid = true; }
+
+                        float vN_des, vE_des;
+                        if (pilot_moving) {
+                            // stick tilt reinterpreted as body-frame velocity request
+                            float vfwd = (-pilot_pitch / PILOT_TILT_REF) * LOI_MAXVEL; // nose-down(-pitch)=fwd
+                            float vrgt = ( pilot_roll  / PILOT_TILT_REF) * LOI_MAXVEL; // right-roll(+)=right
+                            vN_des = vfwd * yc - vrgt * ys;
+                            vE_des = vfwd * ys + vrgt * yc;
+                            loi_tgt_N = posN; loi_tgt_E = posE;   // hold where the stick releases
+                        } else {
+                            float eN = loi_tgt_N - posN, eE = loi_tgt_E - posE;
+                            vN_des = LOI_POS_P * eN; vE_des = LOI_POS_P * eE;
+                            float vmag = sqrtf(vN_des * vN_des + vE_des * vE_des);
+                            if (vmag > LOI_MAXVEL) { vN_des *= LOI_MAXVEL / vmag; vE_des *= LOI_MAXVEL / vmag; }
                         }
+                        float aN = LOI_VEL_P * (vN_des - velN);
+                        float aE = LOI_VEL_P * (vE_des - velE);
+                        float a_fwd = aN * yc + aE * ys;
+                        float a_rgt = -aN * ys + aE * yc;
+                        float lp = -a_fwd / G;   // forward accel -> nose down (-pitch)
+                        float lr = a_rgt / G;    // rightward accel -> roll right (+)
+                        if (lp > LOI_MAXTILT) lp = LOI_MAXTILT; else if (lp < -LOI_MAXTILT) lp = -LOI_MAXTILT;
+                        if (lr > LOI_MAXTILT) lr = LOI_MAXTILT; else if (lr < -LOI_MAXTILT) lr = -LOI_MAXTILT;
+                        current_target_roll = lr;
+                        current_target_pitch = lp;
+                    } else {
+                        // ===== ALTHOLD: direct manual attitude =====
+                        current_target_roll = pilot_roll;
+                        current_target_pitch = pilot_pitch;
+                        loi_valid = false;   // recapture loiter target when re-entering LOITER
                     }
 
                     // --- 1. Altitude Control Loop ---
@@ -788,22 +1077,41 @@ int main(int argc, char* argv[]) {
                     float cp = pid_pitch.compute(target_pitch_rate, (float)imu_data.gyro[1], dt);
                     float cy = pid_yaw.compute(target_yaw_rate, (float)imu_data.gyro[2], dt);
 
-                    // --- 3. Actuator Mixer ---
-                    float fr = throttle + cp - cr + cy; // FR
-                    float fl = throttle + cp + cr - cy; // FL
-                    float rl = throttle - cp + cr + cy; // RL
-                    float rr = throttle - cp - cr - cy; // RR
+                    // --- 3. Actuator Mixer (airmode-style desaturation) ---
+                    // Attitude (roll/pitch/yaw) torque mix per motor, WITHOUT collective.
+                    // Order matches pwm_values below: [0]=FR [1]=RL [2]=FL [3]=RR.
+                    float att[4];
+                    att[0] =  (cp - pitch_trim) - cr + cy; // FR
+                    att[1] = -(cp - pitch_trim) + cr + cy; // RL
+                    att[2] =  (cp - pitch_trim) + cr - cy; // FL
+                    att[3] = -(cp - pitch_trim) - cr - cy; // RR
 
-                    // Clamp to safe limits (0.0 to 1.0)
+                    // If the attitude span alone exceeds the full [0,1] throttle range,
+                    // scale it down uniformly (last resort: lose magnitude, keep ratios).
+                    float amin = att[0], amax = att[0];
+                    for (int i = 1; i < 4; ++i) { amin = std::min(amin, att[i]); amax = std::max(amax, att[i]); }
+                    float span = amax - amin;
+                    if (span > 1.0f) {
+                        float s = 1.0f / span;
+                        for (int i = 0; i < 4; ++i) att[i] *= s;
+                        amin *= s; amax *= s;
+                    }
+
+                    // Shift the collective so all four motors fit in [0,1] while preserving
+                    // the torque differential (prioritize attitude control over exact altitude).
+                    // span<=1 guarantees lo<=hi, so this never clips the differential.
+                    float lo = -amin, hi = 1.0f - amax;
+                    float coll = throttle < lo ? lo : (throttle > hi ? hi : throttle);
+
                     auto clamp = [](float v) {
                         return (v < 0.0f) ? 0.0f : ((v > 1.0f) ? 1.0f : v);
                     };
-                    
+
                     pwm_data.pwm_values = {
-                        clamp(fr), // FR [0]
-                        clamp(rl), // RL [1]
-                        clamp(fl), // FL [2]
-                        clamp(rr)  // RR [3]
+                        clamp(coll + att[0]), // FR [0]
+                        clamp(coll + att[1]), // RL [1]
+                        clamp(coll + att[2]), // FL [2]
+                        clamp(coll + att[3])  // RR [3]
                     };
                 }
 
@@ -864,6 +1172,9 @@ int main(int argc, char* argv[]) {
 
     if (cmd_thread.joinable()) {
         cmd_thread.join();
+    }
+    if (gt_thread.joinable()) {
+        gt_thread.join();
     }
 
     if (log_file.is_open()) {

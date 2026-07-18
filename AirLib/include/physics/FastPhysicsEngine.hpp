@@ -668,6 +668,28 @@ namespace airlib
                 Vector3r acc_body = VectorMath::transformToBodyFrame(lin_acc, state.pose.orientation, true);
                 Vector3r gyro_body = state.twist.angular;
 
+                // --- FC/IMU lever arm ---
+                // The flight controller (IMU) is mounted r_fc FORWARD of the CG, not at the CG.
+                // An accelerometer at an offset reads a_fc = a_cg + w_dot x r + w x (w x r).
+                // (Gyro is unchanged: angular velocity is identical everywhere on a rigid body.)
+                // r_fc = 0.30 m forward of the geometric frame center + 0.10 m (the center sits
+                // 0.10 m ahead of the CG since cg_offset_x = -0.10) = 0.40 m ahead of CG, body +x.
+                // Whole reported state (accel + position + velocity) is expressed at the FC point.
+                const Vector3r r_fc(0.40f, 0.0f, 0.0f);
+                {
+                    static Vector3r s_last_w(0, 0, 0);
+                    static double s_last_w_t = 0.0;
+                    Vector3r w = gyro_body;
+                    double t_now = static_cast<double>(now_ns) * 1e-9;
+                    Vector3r w_dot(0, 0, 0);
+                    double dt_w = t_now - s_last_w_t;
+                    if (s_last_w_t > 0.0 && dt_w > 1e-6 && dt_w < 0.1)
+                        w_dot = (w - s_last_w) / static_cast<real_T>(dt_w);
+                    s_last_w = w;
+                    s_last_w_t = t_now;
+                    acc_body += w_dot.cross(r_fc) + w.cross(w.cross(r_fc));
+                }
+
                 d.gyro[0] = static_cast<double>(gyro_body.x());
                 d.gyro[1] = static_cast<double>(gyro_body.y());
                 d.gyro[2] = static_cast<double>(gyro_body.z());
@@ -682,13 +704,17 @@ namespace airlib
                 d.quat[2] = q.y();
                 d.quat[3] = q.z();
 
-                d.loc_ned[0] = static_cast<double>(state.pose.position.x());
-                d.loc_ned[1] = static_cast<double>(state.pose.position.y());
-                d.loc_ned[2] = static_cast<double>(state.pose.position.z());
+                // Report position and velocity at the FC point, not the CG (lever arm):
+                //   pos_FC = pos_CG + R * r_fc ;  vel_FC = vel_CG + R * (w x r_fc)
+                Vector3r r_world = VectorMath::transformToWorldFrame(r_fc, q, true);
+                Vector3r vlever_world = VectorMath::transformToWorldFrame(gyro_body.cross(r_fc), q, true);
+                d.loc_ned[0] = static_cast<double>(state.pose.position.x() + r_world.x());
+                d.loc_ned[1] = static_cast<double>(state.pose.position.y() + r_world.y());
+                d.loc_ned[2] = static_cast<double>(state.pose.position.z() + r_world.z());
 
-                d.vel_ned[0] = static_cast<double>(state.twist.linear.x());
-                d.vel_ned[1] = static_cast<double>(state.twist.linear.y());
-                d.vel_ned[2] = static_cast<double>(state.twist.linear.z());
+                d.vel_ned[0] = static_cast<double>(state.twist.linear.x() + vlever_world.x());
+                d.vel_ned[1] = static_cast<double>(state.twist.linear.y() + vlever_world.y());
+                d.vel_ned[2] = static_cast<double>(state.twist.linear.z() + vlever_world.z());
 
                 d.alt = -d.loc_ned[2];
                 d.pressure = 101325.0 * std::pow(1.0 - 2.25577e-5 * d.alt, 5.25588);

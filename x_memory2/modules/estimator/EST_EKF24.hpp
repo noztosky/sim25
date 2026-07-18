@@ -214,6 +214,10 @@ public:
 
         Eigen::Matrix<double, 24, 1> dx = K * innovation;
 
+        // Decouple magnetometer updates from roll and pitch errors (states 6 and 7)
+        dx(6) = 0.0;
+        dx(7) = 0.0;
+
         P_ = (Eigen::Matrix<double, 24, 24>::Identity() - K * H) * P_;
 
         inject_error_state(dx);
