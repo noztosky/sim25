@@ -15,6 +15,7 @@
 
 // Sensors
 #include "sensors/imu/ImuBase.hpp"
+#include <cmath>
 #include "sensors/gps/GpsBase.hpp"
 #include "sensors/magnetometer/MagnetometerBase.hpp"
 #include "sensors/barometer/BarometerBase.hpp"
@@ -347,17 +348,27 @@ namespace airlib
 
             const auto& imu_output = getImuData("");
 
+            // Realistic IMU range clipping (real parts saturate at ~ +/-16 g, +/-2000 dps).
+            // Also guards against inf/NaN ground-contact impulses from the rigid-body physics,
+            // which otherwise abort ArduPilot SITL with a floating point exception at liftoff.
+            auto clipf = [](float x, float lim) {
+                if (!std::isfinite(x)) return 0.0f;
+                return x > lim ? lim : (x < -lim ? -lim : x);
+            };
+            const float GYRO_LIM = 34.9f;   // 2000 dps
+            const float ACC_LIM = 156.9f;   // 16 g
+
             buf << "\"imu\": {"
                 << std::fixed << std::setprecision(7)
                 << "\"angular_velocity\": ["
-                << imu_output.angular_velocity[0] << ","
-                << imu_output.angular_velocity[1] << ","
-                << imu_output.angular_velocity[2] << "]"
+                << clipf(imu_output.angular_velocity[0], GYRO_LIM) << ","
+                << clipf(imu_output.angular_velocity[1], GYRO_LIM) << ","
+                << clipf(imu_output.angular_velocity[2], GYRO_LIM) << "]"
                 << ","
                 << "\"linear_acceleration\": ["
-                << imu_output.linear_acceleration[0] << ","
-                << imu_output.linear_acceleration[1] << ","
-                << imu_output.linear_acceleration[2] << "]"
+                << clipf(imu_output.linear_acceleration[0], ACC_LIM) << ","
+                << clipf(imu_output.linear_acceleration[1], ACC_LIM) << ","
+                << clipf(imu_output.linear_acceleration[2], ACC_LIM) << "]"
                 << "}";
 
             float pitch, roll, yaw;

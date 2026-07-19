@@ -63,6 +63,29 @@ namespace airlib
                                                                           ground_truth.kinematics->pose.orientation,
                                                                           true);
 
+            //FC/IMU lever arm: the flight controller is mounted r_fc FORWARD of the CG
+            //(EFT K20 measured: INS_POS1_X = 0.26 m from the real vehicle's parameters).
+            //An accelerometer off the CG additionally reads w_dot x r + w x (w x r).
+            //Gyro is unchanged (rigid body). Compensate in ArduPilot with INS_POS_X if desired.
+            {
+                const Vector3r r_fc(0.26f, 0.0f, 0.0f); //K20 REAL: INS_POS1_X=0.26 from the vehicle log (EKF3 compensates when that param is loaded)
+                const Vector3r& w = output.angular_velocity;                            //body frame
+                //Low-pass the angular-acceleration term (~15 Hz): ground-contact impulses in the
+                //rigid-body sim otherwise appear as huge accel spikes at the offset IMU, which
+                //trips ArduPilot's vibration compensation / EKF variance failsafe on liftoff.
+                static Vector3r w_dot_f(0, 0, 0);
+                const Vector3r& w_dot_raw = ground_truth.kinematics->accelerations.angular; //body frame
+                w_dot_f += 0.086f * (w_dot_raw - w_dot_f); //alpha for ~15 Hz at 1 kHz sensor rate
+                //A/B TEST: lever-arm term DISABLED - it drives ArduPilot EKF variance
+                //failsafe + an SITL FPE at liftoff. Set LEVER_ON=1 to re-enable.
+                #define LEVER_ON 0
+                #if LEVER_ON
+                output.linear_acceleration += w_dot_f.cross(r_fc) + w.cross(w.cross(r_fc));
+                #else
+                (void)r_fc; (void)w; (void)w_dot_f;
+                #endif
+            }
+
             //add noise
             addNoise(output.linear_acceleration, output.angular_velocity);
             // TODO: Add noise in orientation?

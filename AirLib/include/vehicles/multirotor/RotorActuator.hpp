@@ -122,8 +122,13 @@ namespace airlib
             output.control_signal_filtered = control_signal_filter.getOutput();
             //see relationship of rotation speed with thrust: http://physics.stackexchange.com/a/32013/14061
             output.speed = sqrt(output.control_signal_filtered * params.max_speed_square);
-            output.thrust = output.control_signal_filtered * params.max_thrust;
-            output.torque_scaler = output.control_signal_filtered * params.max_torque * static_cast<int>(turning_direction);
+            //Quadratic thrust curve: real propellers give thrust ~ rpm^2, and ESC control maps
+            //~linearly to rpm, so thrust ~ control^2 (stock AirSim used linear control->thrust,
+            //which at high thrust-to-weight makes idle thrust ~ vehicle weight and breaks
+            //descent authority / ArduPilot MOT_THST_EXPO assumptions).
+            const real_T c2 = output.control_signal_filtered * output.control_signal_filtered;
+            output.thrust = c2 * params.max_thrust;
+            output.torque_scaler = c2 * params.max_torque * static_cast<int>(turning_direction);
             output.turning_direction = turning_direction;
         }
 

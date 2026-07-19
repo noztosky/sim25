@@ -594,6 +594,62 @@ namespace airlib
             computeInertiaMatrix(params.inertia, params.body_box, params.rotor_poses, box_mass, motor_assembly_weight);
         }
 
+        void setupFrameEFTK20(Params& params)
+        {
+            /*
+            EFT K20 modular quad platform (2026), EMPTY-TANK configuration.
+
+            Confirmed specs (effort-tech.com K20 PNP + Hobbywing X9/9620):
+              quad, 20 kg payload / 20 L tank (40 L spreader option),
+              Hobbywing 9620 motor 100KV on 14S, 36" composite folding props,
+              MAX thrust 26.5 kgf/axis (peak spec - lesson from Z30 where the 18 kgf
+              "rated" figure halved the modeled control authority), powertrain 1774 g/axis.
+
+            ESTIMATES (measure on the physical vehicle and update):
+              wheelbase ~1550 mm (45x575 arm tube + motor mount + center frame),
+              empty mass ~24 kg (frame ~7.5 + 4x1.8 powertrain + 14S battery ~9 + avionics),
+              CG 5 cm aft (battery aft of center; measure the balance point!).
+            */
+            params.rotor_count = 4;
+            std::vector<real_T> arm_lengths(params.rotor_count, 0.775f); //wheelbase 1550mm / 2 (estimate)
+
+            params.mass = 18.0f; //empty tank + battery. Derived from REAL log: MOT_THST_HOVER=0.165 x (4x26.5 kgf) ~= 17.5 kg
+            real_T motor_assembly_weight = 1.8f; //9620 motor + 36" prop + ESC combo (1774 g spec)
+            real_T box_mass = params.mass - params.rotor_count * motor_assembly_weight;
+
+            //Thrust: keep UIUC C_T/C_P shape, solve max_rpm so C_T*rho*n^2*D^4 == 26.5 kgf (259.9 N):
+            //n = 52.5 rev/s -> ~3150 RPM. Tip speed pi*0.914*52.5 = 151 m/s (peak only).
+            params.rotor_params.C_T = 0.109919f;
+            params.rotor_params.C_P = 0.040164f;
+            params.rotor_params.max_rpm = 3150.0f;
+            params.rotor_params.propeller_diameter = 0.914f; //36 inch
+            params.rotor_params.control_signal_filter_tc = 0.04f; //~40ms spool-up: 36" prop J scales to ~0.54x of the 43" (mass~300g, D^2), similar electrical damping (100KV, R~0.07) -> tau ~= 0.54*58ms
+            params.rotor_params.calculateMaxThrust();
+            //hover check (empty): 18 kg -> 176.6 N -> 44.1 N/rotor = 17.0% of 259.9 N max (real log hovers at 16.5% - matches!)
+            //hover check (20 L full): 38 kg -> 372.8 N -> 93.2 N/rotor = 35.9% of max
+
+            //central modular body (tank bay) - estimate
+            params.body_box.x() = 0.60f;
+            params.body_box.y() = 0.50f;
+            params.body_box.z() = 0.45f;
+            real_T rotor_z = 0.05f;
+
+            initializeRotorQuadX(params.rotor_poses, params.rotor_count, arm_lengths.data(), rotor_z);
+
+            //Small aft CG (battery behind center). ESTIMATE - measure the balance point and update.
+            const real_T cg_offset_x = -0.05f;
+            //Lateral CG offset TO THE RIGHT, derived from the REAL autotune log: right-side motors
+            //(DJI-X C1,C2) averaged ~73 PWM higher than left (C3,C4) -> CG ~2.5 cm right (+y, NED).
+            //This lateral imbalance is a prime suspect for the real "tips sideways" symptom.
+            const real_T cg_offset_y = 0.025f;
+            for (auto& pose : params.rotor_poses) {
+                pose.position.x() -= cg_offset_x;
+                pose.position.y() -= cg_offset_y;
+            }
+
+            computeInertiaMatrix(params.inertia, params.body_box, params.rotor_poses, box_mass, motor_assembly_weight);
+        }
+
     private:
         Params params_;
         SensorCollection sensors_; //maintains sensor type indexed collection of sensors

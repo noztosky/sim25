@@ -38,6 +38,9 @@ namespace airlib
             if (vehicle_setting_->model == "EFTZ30") {
                 setupFrameEFTZ30(params);
             }
+            else if (vehicle_setting_->model == "EFTK20") {
+                setupFrameEFTK20(params);
+            }
             else //Generic
                 setupFrameGenericQuad(params);
         }
