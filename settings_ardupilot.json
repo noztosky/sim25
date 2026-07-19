@@ -1,6 +1,7 @@
 {
     "SettingsVersion": 1.2,
     "SimMode": "Multirotor",
+    "ViewMode": "SpringArmChase",
     "ClockType": "SteppableClock",
     "PhysicsLoopPeriod": 1000000,
     "Vehicles": {

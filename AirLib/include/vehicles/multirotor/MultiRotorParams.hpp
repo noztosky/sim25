@@ -50,6 +50,11 @@ namespace airlib
             //angular coefficient is usually 10X smaller than linear, however we should replace this with exact number
             //http://physics.stackexchange.com/q/304742/14061
             real_T angular_drag_coefficient = linear_drag_coefficient;
+            //Rearward (-x face) drag multiplier: airframes with bulky tanks/gear are far
+            //draggier flying backward (EFT K20 real log: aft cruise needs ~9 deg pitch at
+            //5.7 m/s vs ~3 deg forward). Plain box drag is fore/aft symmetric, so scale
+            //the -x drag face by this factor. 1 = symmetric (default).
+            real_T drag_factor_back_mult = 1.0f;
             real_T restitution = 0.55f; // value of 1 would result in perfectly elastic collisions, 0 would be completely inelastic.
             real_T friction = 0.5f;
             RotorParams rotor_params;
@@ -648,6 +653,14 @@ namespace airlib
             }
 
             computeInertiaMatrix(params.inertia, params.body_box, params.rotor_poses, box_mass, motor_assembly_weight);
+
+            //Drag calibrated to the REAL autotune log cruise tilt (iterated against sim
+            //measurements 2026-07-19; the box model is nonlinear in tilt so coefficients
+            //were fit empirically, not by area math):
+            //  forward  ~3 deg @ 5.0 m/s real -> x2.9 gives sim 3.4 deg @ 6.4 (on target)
+            //  backward ~9 deg @ 5.7 m/s real -> x2.9 x 3.4 back-face (tank/gear wake)
+            params.linear_drag_coefficient *= 2.9f;
+            params.drag_factor_back_mult = 3.4f;
         }
 
     private:
