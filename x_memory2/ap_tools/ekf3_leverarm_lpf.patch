@@ -1,0 +1,33 @@
+diff --git a/libraries/AP_NavEKF3/AP_NavEKF3_core.cpp b/libraries/AP_NavEKF3/AP_NavEKF3_core.cpp
+index 1d2316f..3d2f121 100644
+--- a/libraries/AP_NavEKF3/AP_NavEKF3_core.cpp
++++ b/libraries/AP_NavEKF3/AP_NavEKF3_core.cpp
+@@ -900,7 +900,15 @@ void NavEKF3_core::calcOutputStates()
+     if (!accelPosOffset.is_zero()) {
+         // calculate the average angular rate across the last IMU update
+         // note delAngDT is prevented from being zero in readIMUData()
+-        Vector3F angRate = imuDataNew.delAng * (1.0f/imuDataNew.delAngDT);
++        // XLAB PATCH: low-pass (~10 Hz) the lever-arm angular rate. The raw
++        // delta-angle rate is unfiltered (no INS_GYRO_FILTER, no notch), so with
++        // a large IMU offset gyro vibration injects noise into the velocity
++        // outputs consumed by the position controller (flare wobble on vehicles
++        // with the FC far from the CG).
++        Vector3F angRateRaw = imuDataNew.delAng * (1.0f/imuDataNew.delAngDT);
++        const ftype alphaLA = constrain_ftype(imuDataNew.delAngDT * M_2PI * 10.0f, 0.0f, 1.0f);
++        angRateFiltLA += (angRateRaw - angRateFiltLA) * alphaLA;
++        const Vector3F &angRate = angRateFiltLA;
+ 
+         // Calculate the velocity of the body frame origin relative to the IMU in body frame
+         // and rotate into earth frame. Note % operator has been overloaded to perform a cross product
+diff --git a/libraries/AP_NavEKF3/AP_NavEKF3_core.h b/libraries/AP_NavEKF3/AP_NavEKF3_core.h
+index 8f7b799..8cc9751 100644
+--- a/libraries/AP_NavEKF3/AP_NavEKF3_core.h
++++ b/libraries/AP_NavEKF3/AP_NavEKF3_core.h
+@@ -1196,6 +1196,7 @@ private:
+     uint32_t lastOriginHgtTime_ms;  // last time the ekf's WGS-84 origin height was corrected
+     Vector3F outputTrackError;      // attitude (rad), velocity (m/s) and position (m) tracking error magnitudes from the output observer
+     Vector3F velOffsetNED;          // This adds to the earth frame velocity estimate at the IMU to give the velocity at the body origin (m/s)
++    Vector3F angRateFiltLA;         // XLAB: low-passed angular rate for the lever-arm velocity correction (rad/s)
+     Vector3F posOffsetNED;          // This adds to the earth frame position estimate at the IMU to give the position at the body origin (m)
+     uint32_t firstInitTime_ms;      // First time the initialise function was called (msec)
+     uint32_t lastInitFailReport_ms; // Last time the buffer initialisation failure report was sent (msec)
