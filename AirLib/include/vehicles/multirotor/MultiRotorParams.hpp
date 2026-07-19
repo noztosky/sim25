@@ -55,6 +55,14 @@ namespace airlib
             //5.7 m/s vs ~3 deg forward). Plain box drag is fore/aft symmetric, so scale
             //the -x drag face by this factor. 1 = symmetric (default).
             real_T drag_factor_back_mult = 1.0f;
+            //Wake-turbulence ingestion while flying BACKWARD: the airframe/tank wake
+            //blows into the props, fluctuating each rotor's thrust independently.
+            //Per-rotor multiplicative thrust noise amplitude
+            //  = wake_turb_gain * clamp(-v_body_x / wake_turb_vref, 0, 1)
+            //(real K20 log, aft cruise ~5.7 m/s: attitude wanders +-5-7 deg,
+            // rates +-25 deg/s, motors churn +-80-300 PWM - clean sim shows none).
+            real_T wake_turb_gain = 0.0f; //0 = off (default for all frames)
+            real_T wake_turb_vref = 6.0f; //backward speed [m/s] giving full amplitude
             real_T restitution = 0.55f; // value of 1 would result in perfectly elastic collisions, 0 would be completely inelastic.
             real_T friction = 0.5f;
             RotorParams rotor_params;
@@ -641,12 +649,14 @@ namespace airlib
 
             initializeRotorQuadX(params.rotor_poses, params.rotor_count, arm_lengths.data(), rotor_z);
 
-            //Small aft CG (battery behind center). ESTIMATE - measure the balance point and update.
-            const real_T cg_offset_x = -0.05f;
-            //Lateral CG offset TO THE RIGHT, derived from the REAL autotune log: right-side motors
-            //(DJI-X C1,C2) averaged ~73 PWM higher than left (C3,C4) -> CG ~2.5 cm right (+y, NED).
-            //This lateral imbalance is a prime suspect for the real "tips sideways" symptom.
-            const real_T cg_offset_y = 0.025f;
+            //CG offsets back-calculated from the REAL autotune log hover (3746 samples,
+            //level hover: roll 0.12 deg, CW/CCW groups balanced -> wind and motor-tilt
+            //ruled out; MOT_THST_EXPO=0.75 curve applied):
+            //  right-left thrust split 27.2 N -> CG 8.4 cm RIGHT
+            //  rear-front thrust split  5.7 N -> CG 1.9 cm AFT (20 cm gut feel was 10x off)
+            //(empty-tank flight; re-derive for loaded config. Verify with wheel scales.)
+            const real_T cg_offset_x = -0.02f;
+            const real_T cg_offset_y = 0.084f;
             for (auto& pose : params.rotor_poses) {
                 pose.position.x() -= cg_offset_x;
                 pose.position.y() -= cg_offset_y;
@@ -661,6 +671,10 @@ namespace airlib
             //  backward ~9 deg @ 5.7 m/s real -> x2.9 x 3.4 back-face (tank/gear wake)
             params.linear_drag_coefficient *= 2.9f;
             params.drag_factor_back_mult = 3.4f;
+            //wake turbulence: 0.10 matched the real-log envelope numerically but felt
+            //excessive to the pilot who flies the real K20 -> softened to 0.06
+            params.wake_turb_gain = 0.06f;
+            params.wake_turb_vref = 6.0f;
         }
 
     private:

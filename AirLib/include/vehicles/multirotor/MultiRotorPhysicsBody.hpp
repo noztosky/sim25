@@ -93,6 +93,29 @@ namespace airlib
             for (uint rotor_index = 0; rotor_index < rotors_.size(); ++rotor_index) {
                 rotors_.at(rotor_index).setControlSignal(vehicle_api_->getActuation(rotor_index));
             }
+
+            //wake-turbulence ingestion while flying backward: amplitude scales with
+            //rearward body-x speed (see wake_turb_gain in MultiRotorParams).
+            //LEAKY PEAK-HOLD (~1.5 s): braking from rearward flight decelerates the
+            //vehicle INTO its own wake, so the real roughness peaks DURING the brake
+            //(real log: VibeY spike + max roll error right at the flare). Holding the
+            //amplitude through the stop reproduces that; forward braking stays clean.
+            const auto& wp = params_->getParams();
+            if (wp.wake_turb_gain > 0) {
+                const auto& kin = getKinematics();
+                const Vector3r v_body = VectorMath::transformToBodyFrame(
+                    kin.twist.linear, kin.pose.orientation);
+                real_T wake = 0;
+                if (v_body.x() < 0)
+                    wake = wp.wake_turb_gain *
+                           std::min(-v_body.x() / wp.wake_turb_vref, 1.0f);
+                //decay constant for ~1.5 s at the 1 kHz physics rate
+                wake_hold_ *= 0.99933f;
+                if (wake > wake_hold_)
+                    wake_hold_ = wake;
+                for (uint rotor_index = 0; rotor_index < rotors_.size(); ++rotor_index)
+                    rotors_.at(rotor_index).setWakeTurbulence(wake_hold_);
+            }
         }
 
         //sensor getter
@@ -224,6 +247,7 @@ namespace airlib
         //let us be the owner of rotors object
         vector<RotorActuator> rotors_;
         vector<PhysicsBodyVertex> drag_faces_;
+        real_T wake_hold_ = 0; //leaky peak-hold of wake-turbulence amplitude
 
         std::unique_ptr<Environment> environment_;
         VehicleApiBase* vehicle_api_;

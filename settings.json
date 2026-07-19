@@ -1,7 +1,7 @@
 {
     "SettingsVersion": 1.2,
     "SimMode": "Multirotor",
-    "ViewMode": "SpringArmChase",
+    "ViewMode": "FlyWithMe",
     "ClockType": "SteppableClock",
     "PhysicsLoopPeriod": 1000000,
     "Vehicles": {

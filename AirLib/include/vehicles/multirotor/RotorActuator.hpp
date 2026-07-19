@@ -5,6 +5,7 @@
 #define rotor_actuator_hpp
 
 #include <limits>
+#include <random>
 #include "common/Common.hpp"
 #include "physics/Environment.hpp"
 #include "common/FirstOrderFilter.hpp"
@@ -62,6 +63,15 @@ namespace airlib
             control_signal_filter_.setInput(Utils::clip(control_signal, 0.0f, 1.0f));
         }
 
+        //Wake-turbulence amplitude (0..~0.3): per-rotor multiplicative thrust noise,
+        //set each step by MultiRotorPhysicsBody from backward airspeed. Each rotor
+        //carries its own band-limited noise state so the four thrusts fluctuate
+        //independently -> roll/pitch torque churn like real wake ingestion.
+        void setWakeTurbulence(real_T amplitude)
+        {
+            wake_amp_ = amplitude;
+        }
+
         Output getOutput() const
         {
             return output_;
@@ -84,6 +94,17 @@ namespace airlib
         {
             //update environmental factors before we call base
             updateEnvironmentalFactors();
+
+            //evolve band-limited wake noise (~0.3 s correlation at 1 kHz physics):
+            //first-order filtered white noise normalized to ~unit std, clamped +-3
+            if (wake_amp_ > 0) {
+                const real_T alpha = 0.003f;
+                wake_noise_ += alpha * (norm_dist_(rng_) * 25.8f - wake_noise_);
+                wake_noise_ = Utils::clip(wake_noise_, -3.0f, 3.0f);
+            }
+            else {
+                wake_noise_ = 0;
+            }
 
             //this will in turn call setWrench
             PhysicsBodyVertex::update();
@@ -110,9 +131,12 @@ namespace airlib
         virtual void setWrench(Wrench& wrench) override
         {
             Vector3r normal = getNormal();
+            //wake ingestion: multiplicative thrust fluctuation (clamped so a noise
+            //spike can never reverse or absurdly boost a rotor)
+            const real_T wake_mult = Utils::clip(1.0f + wake_amp_ * wake_noise_, 0.3f, 1.7f);
             //forces and torques are proportional to air density: http://physics.stackexchange.com/a/32013/14061
-            wrench.force = normal * output_.thrust * air_density_ratio_;
-            wrench.torque = normal * output_.torque_scaler * air_density_ratio_; //TODO: try using filtered control here
+            wrench.force = normal * output_.thrust * air_density_ratio_ * wake_mult;
+            wrench.torque = normal * output_.torque_scaler * air_density_ratio_ * wake_mult; //TODO: try using filtered control here
         }
 
     private: //methods
@@ -146,6 +170,10 @@ namespace airlib
         const Environment* environment_ = nullptr;
         real_T air_density_sea_level_, air_density_ratio_;
         Output output_;
+        //wake turbulence state (per rotor, independent seeds via id)
+        real_T wake_amp_ = 0, wake_noise_ = 0;
+        std::mt19937 rng_{ std::random_device{}() };
+        std::normal_distribution<real_T> norm_dist_{ 0.0f, 1.0f };
     };
 }
 } //namespace
