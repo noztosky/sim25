@@ -79,12 +79,20 @@ std::atomic<float> g_gt_posN(0.0f), g_gt_posE(0.0f);                    // m, TR
 // Lets you tune PID/hover without recompiling: edit the file and rerun SIL_App.
 struct TuneParams {
     float hover_throttle;
-    // altitude PID
+    // Altitude: ArduPilot-style PSC cascade.
+    //   alt_p      = PSC_POSZ_P   (position error [m] -> climb-rate target [m/s])
+    //   psc_velz_p = PSC_VELZ_P   (climb-rate error -> throttle delta)
+    //   alt_i/d    = PSC_VELZ_I/D (velocity-loop I/D)
+    //   pilot_spd_up/dn = PILOT_SPEED_UP/DN climb/descent-rate limits [m/s]
     float alt_p, alt_i, alt_d, alt_ilim, alt_min, alt_max, alt_dfilt;
+    float psc_velz_p, pilot_spd_up, pilot_spd_dn;
     // roll/pitch rate PID (inner loop)
     float rate_p, rate_i, rate_d, rate_clamp, rate_ilim, rate_dfilt;
     // gyro low-pass ahead of the rate controller (ArduPilot INS_GYRO_FILTER, default 20 Hz)
     float gyro_filt;
+    // Loiter: stick is a VELOCITY command (full stick = loi_maxvel m/s); the tilt the
+    // position controller may command is capped at loi_maxtilt (deg). Both file-tunable.
+    float loi_maxvel, loi_maxtilt;
     // yaw rate PID
     float yaw_p, yaw_i, yaw_d, yaw_clamp;
     // outer angle->rate gains
@@ -97,17 +105,21 @@ static TuneParams defaultTuneParams(bool is_z30) {
     TuneParams p{};
     if (is_z30) {
         p.hover_throttle = 0.74f;
-        p.alt_p = 0.12f; p.alt_i = 0.03f; p.alt_d = 0.14f; p.alt_ilim = 0.15f; p.alt_min = -0.30f; p.alt_max = 0.10f; p.alt_dfilt = 10.0f;
+        p.alt_p = 1.0f; p.alt_i = 0.03f; p.alt_d = 0.0f; p.alt_ilim = 0.15f; p.alt_min = -0.30f; p.alt_max = 0.10f; p.alt_dfilt = 10.0f;
+        p.psc_velz_p = 0.15f; p.pilot_spd_up = 2.5f; p.pilot_spd_dn = 1.5f;
         p.rate_p = 0.10f; p.rate_i = 0.02f; p.rate_d = 0.030f; p.rate_clamp = 0.20f; p.rate_ilim = 0.10f; p.rate_dfilt = 20.0f;
         p.gyro_filt = 20.0f;
+        p.loi_maxvel = 7.0f; p.loi_maxtilt = 30.0f;
         p.yaw_p = 0.15f; p.yaw_i = 0.05f; p.yaw_d = 0.0f; p.yaw_clamp = 0.15f;
         p.again_roll = 3.0f; p.again_pitch = 3.0f; p.again_yaw = 1.5f;
         p.pitch_trim = 0.076f;
     } else {
         p.hover_throttle = 0.59f;
-        p.alt_p = 0.18f; p.alt_i = 0.04f; p.alt_d = 0.10f; p.alt_ilim = 0.20f; p.alt_min = -0.25f; p.alt_max = 0.25f; p.alt_dfilt = 10.0f;
+        p.alt_p = 1.0f; p.alt_i = 0.04f; p.alt_d = 0.0f; p.alt_ilim = 0.20f; p.alt_min = -0.25f; p.alt_max = 0.25f; p.alt_dfilt = 10.0f;
+        p.psc_velz_p = 0.18f; p.pilot_spd_up = 2.5f; p.pilot_spd_dn = 1.5f;
         p.rate_p = 0.08f; p.rate_i = 0.02f; p.rate_d = 0.005f; p.rate_clamp = 0.15f; p.rate_ilim = 0.10f; p.rate_dfilt = 20.0f;
         p.gyro_filt = 20.0f;
+        p.loi_maxvel = 7.0f; p.loi_maxtilt = 30.0f;
         p.yaw_p = 0.15f; p.yaw_i = 0.05f; p.yaw_d = 0.0f; p.yaw_clamp = 0.15f;
         p.again_roll = 4.5f; p.again_pitch = 5.0f; p.again_yaw = 1.5f;
         p.pitch_trim = 0.0f;
@@ -157,6 +169,11 @@ static int loadTuneParams(const std::string& path, TuneParams& p) {
         else if (key == "rate_ilim") p.rate_ilim = v;
         else if (key == "rate_dfilt") p.rate_dfilt = v;
         else if (key == "gyro_filt") p.gyro_filt = v;
+        else if (key == "loi_maxvel") p.loi_maxvel = v;
+        else if (key == "loi_maxtilt") p.loi_maxtilt = v;
+        else if (key == "psc_velz_p") p.psc_velz_p = v;
+        else if (key == "pilot_spd_up") p.pilot_spd_up = v;
+        else if (key == "pilot_spd_dn") p.pilot_spd_dn = v;
         else if (key == "yaw_p") p.yaw_p = v;
         else if (key == "yaw_i") p.yaw_i = v;
         else if (key == "yaw_d") p.yaw_d = v;
@@ -574,6 +591,10 @@ int main(int argc, char* argv[]) {
     float hover_throttle = 0.0f;
     float gyro_lpf_hz = 20.0f;               // ArduPilot INS_GYRO_FILTER equivalent
     float gyro_f[3] = { 0.0f, 0.0f, 0.0f };  // filtered gyro state (rate-controller input)
+    float loi_maxvel_mps = 7.0f;             // Loiter full-stick velocity command (m/s)
+    float loi_maxtilt_deg = 30.0f;           // Loiter tilt cap the position ctrl may command
+    float psc_posz_p_v = 1.0f;               // PSC_POSZ_P: alt error -> climb-rate target
+    float pilot_spd_up_v = 2.5f, pilot_spd_dn_v = 1.5f;  // PILOT_SPEED_UP/DN (m/s)
     float pitch_trim = 0.0f;
     PID pid_alt, pid_roll, pid_pitch, pid_yaw;
 
@@ -585,9 +606,15 @@ int main(int argc, char* argv[]) {
         hover_throttle   = t.hover_throttle;
         pitch_trim       = t.pitch_trim;
         gyro_lpf_hz      = t.gyro_filt;
-        pid_alt.set_gains(t.alt_p, t.alt_i, t.alt_d, 0.0f);
+        loi_maxvel_mps   = t.loi_maxvel;
+        loi_maxtilt_deg  = t.loi_maxtilt;
+        // pid_alt is the PSC_VELZ stage: climb-rate error -> throttle delta
+        pid_alt.set_gains(t.psc_velz_p, t.alt_i, t.alt_d, 0.0f);
         pid_alt.set_limits(t.alt_ilim, t.alt_min, t.alt_max);
         pid_alt.set_d_filter_hz(t.alt_dfilt);
+        psc_posz_p_v   = t.alt_p;
+        pilot_spd_up_v = t.pilot_spd_up;
+        pilot_spd_dn_v = t.pilot_spd_dn;
         pid_roll.set_gains(t.rate_p, t.rate_i, t.rate_d, 0.0f);
         pid_roll.set_limits(t.rate_ilim, -t.rate_clamp, t.rate_clamp);
         pid_roll.set_d_filter_hz(t.rate_dfilt);
@@ -1081,13 +1108,15 @@ int main(int argc, char* argv[]) {
                     if (flight_mode == 1 && has_est) {
                         // ===== LOITER: GPS horizontal position/velocity hold =====
                         const float G = 9.81f;
-                        const float LOI_MAXVEL = 8.0f;       // m/s max commanded speed (raised so full
-                                                             // stick can drive up to the 30 deg tilt cap)
+                        // Velocity-first semantics: the stick is a VELOCITY command. Full stick
+                        // (a tilt command equal to loi_maxtilt from the GUI) maps to loi_maxvel m/s;
+                        // the tilt angle is only an actuation CAP, not the command variable.
+                        const float LOI_MAXVEL = loi_maxvel_mps;                       // param (default 7 m/s)
                         const float LOI_POS_P = 0.25f;       // position error -> desired velocity (gentle)
                         const float LOI_VEL_P = 1.0f;        // velocity error -> accel (gentle: outer loop
                                                              // must be far slower than the attitude loop)
-                        const float LOI_MAXTILT = 0.52f;     // ~30 deg cap on loiter-commanded tilt
-                        const float PILOT_TILT_REF = 0.52f;  // full stick (30 deg cmd) -> LOI_MAXVEL
+                        const float LOI_MAXTILT = loi_maxtilt_deg * 0.01745329f;       // param (default 30 deg)
+                        const float PILOT_TILT_REF = LOI_MAXTILT;                      // full stick reference
 
                         float posN = (float)est.pos_ned[0], posE = (float)est.pos_ned[1];
                         float velN = (float)est.vel_ned[0], velE = (float)est.vel_ned[1];
@@ -1097,9 +1126,14 @@ int main(int argc, char* argv[]) {
 
                         float vN_des, vE_des;
                         if (pilot_moving) {
-                            // stick tilt reinterpreted as body-frame velocity request
-                            float vfwd = (-pilot_pitch / PILOT_TILT_REF) * LOI_MAXVEL; // nose-down(-pitch)=fwd
-                            float vrgt = ( pilot_roll  / PILOT_TILT_REF) * LOI_MAXVEL; // right-roll(+)=right
+                            // stick fraction (clamped +/-1) -> body-frame velocity request,
+                            // so a held key/full stick commands exactly loi_maxvel m/s
+                            float ffwd = -pilot_pitch / PILOT_TILT_REF;  // nose-down(-pitch)=fwd
+                            float frgt =  pilot_roll  / PILOT_TILT_REF;  // right-roll(+)=right
+                            if (ffwd > 1.0f) ffwd = 1.0f; else if (ffwd < -1.0f) ffwd = -1.0f;
+                            if (frgt > 1.0f) frgt = 1.0f; else if (frgt < -1.0f) frgt = -1.0f;
+                            float vfwd = ffwd * LOI_MAXVEL;
+                            float vrgt = frgt * LOI_MAXVEL;
                             vN_des = vfwd * yc - vrgt * ys;
                             vE_des = vfwd * ys + vrgt * yc;
                             loi_tgt_N = posN; loi_tgt_E = posE;   // hold where the stick releases
@@ -1126,10 +1160,20 @@ int main(int argc, char* argv[]) {
                         loi_valid = false;   // recapture loiter target when re-entering LOITER
                     }
 
-                    // --- 1. Altitude Control Loop ---
-                    // Use EKF estimated altitude if healthy, otherwise fall back to raw barometer
+                    // --- 1. Altitude Control: ArduPilot PSC cascade ---
+                    // position -> climb-rate target (PSC_POSZ_P), clamped by PILOT_SPEED_UP/DN,
+                    // then climb-rate PID (PSC_VELZ) -> throttle delta. The rate limit is what
+                    // structurally prevents altitude overshoot (unlike the old single alt PID).
                     float feedback_alt = has_est ? -est.pos_ned[2] : current_altitude;
-                    float alt_output = pid_alt.compute(current_target_alt, feedback_alt, dt);
+                    float climb_rate = has_est ? -(float)est.vel_ned[2] : 0.0f;
+                    // Landed I-term relax (ArduPilot-style): while still on/near the ground the
+                    // climb-rate target is unmet, which would wind up the integrator and cause a
+                    // climb-rate overshoot right after liftoff. Keep the PID cleared until airborne.
+                    if (feedback_alt < 0.2f) pid_alt.reset();
+                    float climb_tgt = psc_posz_p_v * (current_target_alt - feedback_alt);
+                    if (climb_tgt > pilot_spd_up_v) climb_tgt = pilot_spd_up_v;
+                    else if (climb_tgt < -pilot_spd_dn_v) climb_tgt = -pilot_spd_dn_v;
+                    float alt_output = pid_alt.compute(climb_tgt, climb_rate, dt);
                     float throttle = hover_throttle + alt_output;
 
                     float target_roll = current_target_roll;

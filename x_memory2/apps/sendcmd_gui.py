@@ -364,58 +364,85 @@ class SendCmdGUI:
             parent.grid_columnconfigure(1, weight=0)
             self.param_entries[key] = entry
 
-        # 1. Altitude Frame
-        alt_frame = tk.LabelFrame(grid_frame, text=" Altitude / Collective ", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.fg_color, bd=0)
+        # Labels use ArduPilot parameter names where a true equivalent exists.
+        #   ≈ prefix = approximate mapping (our structure differs from AP's cascade)
+        #   *        = custom parameter, no AP equivalent
+        # File keys (rate_p, alt_p, ...) are unchanged — display names only.
+        grid_frame.grid_rowconfigure(2, weight=1)
+
+        # 1. Altitude Frame — genuine AP PSC cascade (pos->vel P, vel PID, rate limits)
+        alt_frame = tk.LabelFrame(grid_frame, text=" Altitude (PSC cascade) ", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.fg_color, bd=0)
         alt_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         alt_keys = [
-            ("Hover Throttle:", "hover_throttle"),
-            ("Alt P:", "alt_p"),
-            ("Alt I:", "alt_i"),
-            ("Alt D:", "alt_d"),
-            ("Alt I-Lim:", "alt_ilim"),
-            ("Alt Min:", "alt_min"),
-            ("Alt Max:", "alt_max"),
-            ("Alt D-Filt:", "alt_dfilt")
+            ("MOT_THST_HOVER:", "hover_throttle"),
+            ("PSC_POSZ_P:", "alt_p"),
+            ("PSC_VELZ_P:", "psc_velz_p"),
+            ("PSC_VELZ_I:", "alt_i"),
+            ("PSC_VELZ_D:", "alt_d"),
+            ("PSC_VELZ_IMAX:", "alt_ilim"),
+            ("PILOT_SPEED_UP (m/s):", "pilot_spd_up"),
+            ("PILOT_SPEED_DN (m/s):", "pilot_spd_dn"),
+            ("Thr Out Min*:", "alt_min"),
+            ("Thr Out Max*:", "alt_max"),
+            ("PSC_VELZ_FLTD:", "alt_dfilt")
         ]
         for idx, (lbl, key) in enumerate(alt_keys):
             add_entry(alt_frame, lbl, key, idx)
 
-        # 2. Inner Rate Frame
-        rate_frame = tk.LabelFrame(grid_frame, text=" Inner Rate PID ", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.fg_color, bd=0)
+        # 2. Inner Rate Frame (shared roll/pitch = AP ATC_RAT_RLL_* + ATC_RAT_PIT_*)
+        rate_frame = tk.LabelFrame(grid_frame, text=" Rate PID (ATC_RAT_RP_*) ", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.fg_color, bd=0)
         rate_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         rate_keys = [
-            ("Rate P:", "rate_p"),
-            ("Rate I:", "rate_i"),
-            ("Rate D:", "rate_d"),
-            ("Rate I-Lim:", "rate_ilim"),
-            ("Rate Clamp:", "rate_clamp"),
-            ("Rate D-Filt:", "rate_dfilt")
+            ("ATC_RAT_RP_P:", "rate_p"),
+            ("ATC_RAT_RP_I:", "rate_i"),
+            ("ATC_RAT_RP_D:", "rate_d"),
+            ("ATC_RAT_RP_IMAX:", "rate_ilim"),
+            ("Rate Clamp*:", "rate_clamp"),
+            ("ATC_RAT_RP_FLTD:", "rate_dfilt"),
+            ("INS_GYRO_FILTER:", "gyro_filt")
         ]
         for idx, (lbl, key) in enumerate(rate_keys):
             add_entry(rate_frame, lbl, key, idx)
 
-        # 3. Outer Angle Frame
-        angle_frame = tk.LabelFrame(grid_frame, text=" Outer Angle Gains ", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.fg_color, bd=0)
+        # 3. Outer Angle Frame (AP ATC_ANG_*)
+        angle_frame = tk.LabelFrame(grid_frame, text=" Angle P (ATC_ANG_*) ", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.fg_color, bd=0)
         angle_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         angle_keys = [
-            ("Roll Gain:", "again_roll"),
-            ("Pitch Gain:", "again_pitch"),
-            ("Yaw Gain:", "again_yaw")
+            ("ATC_ANG_RLL_P:", "again_roll"),
+            ("ATC_ANG_PIT_P:", "again_pitch"),
+            ("ATC_ANG_YAW_P:", "again_yaw"),
+            ("Pitch Trim (CG)*:", "pitch_trim")
         ]
         for idx, (lbl, key) in enumerate(angle_keys):
             add_entry(angle_frame, lbl, key, idx)
 
-        # 4. Yaw Control Frame
-        yaw_frame = tk.LabelFrame(grid_frame, text=" Yaw PID ", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.fg_color, bd=0)
+        # 4. Yaw Rate Frame (AP ATC_RAT_YAW_*)
+        yaw_frame = tk.LabelFrame(grid_frame, text=" Yaw Rate (ATC_RAT_YAW_*) ", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.fg_color, bd=0)
         yaw_frame.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
         yaw_keys = [
-            ("Yaw P:", "yaw_p"),
-            ("Yaw I:", "yaw_i"),
-            ("Yaw D:", "yaw_d"),
-            ("Yaw Clamp:", "yaw_clamp")
+            ("ATC_RAT_YAW_P:", "yaw_p"),
+            ("ATC_RAT_YAW_I:", "yaw_i"),
+            ("ATC_RAT_YAW_D:", "yaw_d"),
+            ("Yaw Clamp*:", "yaw_clamp")
         ]
         for idx, (lbl, key) in enumerate(yaw_keys):
             add_entry(yaw_frame, lbl, key, idx)
+
+        # 5. Loiter Frame (AP LOIT_*; note LOIT_SPEED is cm/s in AP, ours is m/s)
+        loi_frame = tk.LabelFrame(grid_frame, text=" Loiter (LOIT_*) ", font=("Segoe UI", 9, "bold"), bg=self.card_bg, fg=self.fg_color, bd=0)
+        loi_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
+        loi_keys = [
+            ("LOIT_SPEED (m/s):", "loi_maxvel"),
+            ("LOIT_ANG_MAX (deg):", "loi_maxtilt")
+        ]
+        for idx, (lbl, key) in enumerate(loi_keys):
+            add_entry(loi_frame, lbl, key, idx)
+
+        # legend
+        legend = tk.Label(grid_frame,
+                          text="AP name = 1:1 equivalent\n≈ = approximate mapping\n* = custom (no AP param)\n(file keys unchanged)",
+                          bg=self.card_bg, fg="#999", font=("Segoe UI", 8), justify="left", anchor="nw", padx=8, pady=6)
+        legend.grid(row=2, column=1, sticky="nsew", padx=5, pady=5)
 
         # Bottom Buttons
         btn_frame = tk.Frame(self.tab_pid, bg=self.bg_color)
@@ -660,9 +687,9 @@ class SendCmdGUI:
             dx *= self._js_r / dist
             dy *= self._js_r / dist
         self.joy.coords(self._knob, c + dx - 12, c + dy - 12, c + dx + 12, c + dy + 12)
-        tilt = self._flt(self.tilt_var, 12.0)
-        self.js_roll = dx / self._js_r * tilt
-        self.js_pitch = dy / self._js_r * tilt   # stick up (dy<0) = forward = nose-down = -pitch
+        # store as FRACTION (-1..1); pilot_tick scales by the mode's full-scale
+        self.js_roll = dx / self._js_r
+        self.js_pitch = dy / self._js_r   # stick up (dy<0) = forward = nose-down = -pitch
 
     def on_joy_release(self, event):
         c = self._js_size / 2
@@ -685,11 +712,24 @@ class SendCmdGUI:
         back = ("s" in p) or ("down" in p)
         right = ("d" in p) or ("right" in p)
         left = ("a" in p) or ("left" in p)
+        # Full-scale of the stick command:
+        #  LOITER  -> loi_maxtilt (SIL_App maps full stick to loi_maxvel m/s, e.g. held key = 7 m/s)
+        #  ALTHOLD -> the Tilt angle setting (direct attitude command)
+        if self.mode_var.get() == "LOITER":
+            full = 30.0
+            ent = self.param_entries.get("loi_maxtilt")
+            if ent is not None:
+                try:
+                    full = float(ent.get())
+                except ValueError:
+                    pass
+        else:
+            full = tilt
         # forward = nose DOWN = negative pitch on this airframe (+pitch is nose-up = backward)
-        pitch = (-tilt if fwd else 0.0) + (tilt if back else 0.0) + self.js_pitch
-        roll = (tilt if right else 0.0) - (tilt if left else 0.0) + self.js_roll
-        roll = max(-tilt, min(tilt, roll))
-        pitch = max(-tilt, min(tilt, pitch))
+        pitch = (-full if fwd else 0.0) + (full if back else 0.0) + self.js_pitch * full
+        roll = (full if right else 0.0) - (full if left else 0.0) + self.js_roll * full
+        roll = max(-full, min(full, roll))
+        pitch = max(-full, min(full, pitch))
 
         # yaw: rate control -> accumulate a heading offset while Q/E held
         if "e" in p:

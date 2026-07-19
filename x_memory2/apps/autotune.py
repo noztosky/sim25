@@ -49,10 +49,11 @@ PHASES = {
         ("pitch_trim", -0.05, 0.20, 0.0128),
     ],
     "altitude": [
-        ("alt_p",    0.03, 0.35, 0.1236),
-        ("alt_i",    0.00, 0.15, 0.03),
-        ("alt_d",    0.00, 0.35, 0.1442),
-        ("alt_max",  0.05, 0.40, 0.10),
+        # AP PSC cascade: alt_p = PSC_POSZ_P, psc_velz_p = PSC_VELZ_P (vel err -> throttle)
+        ("alt_p",       0.5, 2.5, 1.0),
+        ("psc_velz_p",  0.05, 0.40, 0.15),
+        ("alt_i",       0.00, 0.15, 0.03),
+        ("alt_d",       0.00, 0.10, 0.0),
     ],
 }
 
