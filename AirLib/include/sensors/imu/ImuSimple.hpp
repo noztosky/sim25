@@ -78,7 +78,7 @@ namespace airlib
                 w_dot_f += 0.086f * (w_dot_raw - w_dot_f); //alpha for ~15 Hz at 1 kHz sensor rate
                 //A/B TEST: lever-arm term DISABLED - it drives ArduPilot EKF variance
                 //failsafe + an SITL FPE at liftoff. Set LEVER_ON=1 to re-enable.
-                #define LEVER_ON 0
+                #define LEVER_ON 1
                 #if LEVER_ON
                 output.linear_acceleration += w_dot_f.cross(r_fc) + w.cross(w.cross(r_fc));
                 #else

@@ -655,8 +655,9 @@ namespace airlib
             //  right-left thrust split 27.2 N -> CG 8.4 cm RIGHT
             //  rear-front thrust split  5.7 N -> CG 1.9 cm AFT (20 cm gut feel was 10x off)
             //(empty-tank flight; re-derive for loaded config. Verify with wheel scales.)
-            const real_T cg_offset_x = -0.02f;
-            const real_T cg_offset_y = 0.084f;
+            //iter2: hover-check gave +30.2/+3.8 N vs targets +27.2/+5.7 -> scale
+            const real_T cg_offset_x = -0.03f;
+            const real_T cg_offset_y = 0.076f;
             for (auto& pose : params.rotor_poses) {
                 pose.position.x() -= cg_offset_x;
                 pose.position.y() -= cg_offset_y;
