@@ -31,12 +31,36 @@
 #include <atomic>
 #include <mutex>
 #include <algorithm>
+#include <deque>
+#include <array>
 
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "ws2_32.lib")
 
 std::ofstream log_file;
 std::atomic<bool> should_exit(false);
+
+// --- Realistic sensor transport-delay lines -------------------------------------
+// The simulator produces every sensor instantly from ground truth; real GPS/baro/mag
+// lag the true state by a transport/solution delay. We buffer each sensor and feed
+// the EKF the sample that is LATENCY old, so the estimator (and Loiter) behaves like
+// a real vehicle. (IMU/gyro left instant: real IMU lag ~1ms is negligible vs 60ms motor lag.)
+static const uint64_t GPS_LATENCY_NS  = 120000000ULL; // 120 ms - GPS position/velocity solution delay (dominant)
+static const uint64_t BARO_LATENCY_NS = 15000000ULL;  // 15 ms
+static const uint64_t MAG_LATENCY_NS  = 8000000ULL;   // 8 ms
+template <typename T>
+struct DelayLine {
+    std::deque<std::pair<uint64_t, T>> buf;
+    void push(uint64_t ts, const T& d) { buf.emplace_back(ts, d); if (buf.size() > 2048) buf.pop_front(); }
+    // Release the oldest buffered sample once it is at least `latency` old.
+    bool pop_due(uint64_t now_ns, uint64_t latency_ns, T& out) {
+        if (!buf.empty() && buf.front().first + latency_ns <= now_ns) {
+            out = buf.front().second; buf.pop_front(); return true;
+        }
+        return false;
+    }
+    void clear() { buf.clear(); }
+};
 
 // --- Ground-truth (physics) feedback probe -------------------------------------
 // When enabled with the `gt` arg, a low-rate thread polls AirSim RPC for the TRUE
@@ -59,6 +83,8 @@ struct TuneParams {
     float alt_p, alt_i, alt_d, alt_ilim, alt_min, alt_max, alt_dfilt;
     // roll/pitch rate PID (inner loop)
     float rate_p, rate_i, rate_d, rate_clamp, rate_ilim, rate_dfilt;
+    // gyro low-pass ahead of the rate controller (ArduPilot INS_GYRO_FILTER, default 20 Hz)
+    float gyro_filt;
     // yaw rate PID
     float yaw_p, yaw_i, yaw_d, yaw_clamp;
     // outer angle->rate gains
@@ -73,6 +99,7 @@ static TuneParams defaultTuneParams(bool is_z30) {
         p.hover_throttle = 0.74f;
         p.alt_p = 0.12f; p.alt_i = 0.03f; p.alt_d = 0.14f; p.alt_ilim = 0.15f; p.alt_min = -0.30f; p.alt_max = 0.10f; p.alt_dfilt = 10.0f;
         p.rate_p = 0.10f; p.rate_i = 0.02f; p.rate_d = 0.030f; p.rate_clamp = 0.20f; p.rate_ilim = 0.10f; p.rate_dfilt = 20.0f;
+        p.gyro_filt = 20.0f;
         p.yaw_p = 0.15f; p.yaw_i = 0.05f; p.yaw_d = 0.0f; p.yaw_clamp = 0.15f;
         p.again_roll = 3.0f; p.again_pitch = 3.0f; p.again_yaw = 1.5f;
         p.pitch_trim = 0.076f;
@@ -80,6 +107,7 @@ static TuneParams defaultTuneParams(bool is_z30) {
         p.hover_throttle = 0.59f;
         p.alt_p = 0.18f; p.alt_i = 0.04f; p.alt_d = 0.10f; p.alt_ilim = 0.20f; p.alt_min = -0.25f; p.alt_max = 0.25f; p.alt_dfilt = 10.0f;
         p.rate_p = 0.08f; p.rate_i = 0.02f; p.rate_d = 0.005f; p.rate_clamp = 0.15f; p.rate_ilim = 0.10f; p.rate_dfilt = 20.0f;
+        p.gyro_filt = 20.0f;
         p.yaw_p = 0.15f; p.yaw_i = 0.05f; p.yaw_d = 0.0f; p.yaw_clamp = 0.15f;
         p.again_roll = 4.5f; p.again_pitch = 5.0f; p.again_yaw = 1.5f;
         p.pitch_trim = 0.0f;
@@ -128,6 +156,7 @@ static int loadTuneParams(const std::string& path, TuneParams& p) {
         else if (key == "rate_clamp") p.rate_clamp = v;
         else if (key == "rate_ilim") p.rate_ilim = v;
         else if (key == "rate_dfilt") p.rate_dfilt = v;
+        else if (key == "gyro_filt") p.gyro_filt = v;
         else if (key == "yaw_p") p.yaw_p = v;
         else if (key == "yaw_i") p.yaw_i = v;
         else if (key == "yaw_d") p.yaw_d = v;
@@ -543,6 +572,8 @@ int main(int argc, char* argv[]) {
     // Setup PID Controllers from tuning params (file-loadable + live-reloadable via "pid" command)
     float att_rate_gain_rp = 0.0f, att_rate_gain_p = 0.0f, att_rate_gain_y = 0.0f;
     float hover_throttle = 0.0f;
+    float gyro_lpf_hz = 20.0f;               // ArduPilot INS_GYRO_FILTER equivalent
+    float gyro_f[3] = { 0.0f, 0.0f, 0.0f };  // filtered gyro state (rate-controller input)
     float pitch_trim = 0.0f;
     PID pid_alt, pid_roll, pid_pitch, pid_yaw;
 
@@ -553,6 +584,7 @@ int main(int argc, char* argv[]) {
         att_rate_gain_y  = t.again_yaw;
         hover_throttle   = t.hover_throttle;
         pitch_trim       = t.pitch_trim;
+        gyro_lpf_hz      = t.gyro_filt;
         pid_alt.set_gains(t.alt_p, t.alt_i, t.alt_d, 0.0f);
         pid_alt.set_limits(t.alt_ilim, t.alt_min, t.alt_max);
         pid_alt.set_d_filter_hz(t.alt_dfilt);
@@ -570,6 +602,10 @@ int main(int argc, char* argv[]) {
     // Target intervals in Nanoseconds
     const uint64_t IMU_TARGET_NS = (uint64_t)(1000000000.0 / target_hz);
     const uint64_t PWM_TARGET_NS = 2500000;   // 400 Hz (2.5ms)
+    // Control loop runs at 400 Hz (ArduPilot SCHED_LOOP_RATE default), decimated from the
+    // full IMU/EKF rate (1000 Hz). IMU sampling + EKF propagation stay at the sim rate.
+    const uint64_t CONTROL_PERIOD_NS = 2500000;   // 400 Hz control loop
+    const float    CONTROL_DT = 1.0f / 400.0f;
 
     IMUData imu_data;
     PWMData pwm_data;
@@ -577,10 +613,17 @@ int main(int argc, char* argv[]) {
 
     uint64_t last_imu_ts = 0;
     uint64_t last_pwm_send_ts = 0;
+    uint64_t last_control_ts = 0;   // 400 Hz control-loop scheduler
     uint64_t last_ekf_gnss_ts = 0;
     uint64_t last_ekf_baro_ts = 0;
+    uint64_t last_ekf_imu_ts = 0;   // 100 Hz EKF propagation scheduler (ArduPilot-like)
     uint64_t last_ekf_mag_ts = 0;
     int ignore_sensor_frames = 0;
+
+    // Sensor delay lines (feed EKF the delayed samples so latency is realistic)
+    DelayLine<GNSSData> gnss_delay;
+    DelayLine<BAROData> baro_delay;
+    DelayLine<std::array<double, 3>> mag_delay;
 
     bool yaw_ref_set = false;
     float yaw_ref_rad = 0.0f;
@@ -756,8 +799,22 @@ int main(int argc, char* argv[]) {
                 last_report_wall_time = now_wall_report;
             }
 
-                // Propagate EKF state using IMU
-                ekf.update_imu(imu_data);
+                // Gyro low-pass at the full 1000 Hz sample rate (ArduPilot INS_GYRO_FILTER,
+                // default 20 Hz). The rate controller consumes this filtered gyro; the EKF
+                // keeps the raw samples.
+                {
+                    float rc = 1.0f / (2.0f * 3.14159265f * (gyro_lpf_hz > 1.0f ? gyro_lpf_hz : 20.0f));
+                    float a = dt / (rc + dt);
+                    for (int gi = 0; gi < 3; ++gi)
+                        gyro_f[gi] += a * ((float)imu_data.gyro[gi] - gyro_f[gi]);
+                }
+
+                // Propagate EKF state using IMU at 100 Hz (ArduPilot EKF3 update rate).
+                // Gyro/accel are still SAMPLED at 1000 Hz; the estimator runs at 100 Hz.
+                if (imu_data.timestamp_ns - last_ekf_imu_ts >= 10000000ULL) { // 100 Hz
+                    ekf.update_imu(imu_data);
+                    last_ekf_imu_ts = imu_data.timestamp_ns;
+                }
 
                 // --- Read GNSS and Baro (Common Sensor API Layer) ---
                 GNSSData gnss_data;
@@ -781,18 +838,31 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // Fuse GNSS and Barometer updates in EKF (natively downsampled by sensor API to 10 Hz and 50 Hz)
-                if (has_gnss) {
-                    ekf.update_gnss(gnss_data);
+                // Fuse GNSS/Baro/Mag in EKF through realistic transport-delay lines:
+                // buffer the fresh sample, then feed the EKF whatever sample is now LATENCY old.
+                uint64_t now_ns = imu_data.timestamp_ns;
+                // ArduPilot-default sensor rates (sim otherwise delivers them at ~1 kHz):
+                //   GPS 5 Hz (GPS_RATE_MS=200), baro 10 Hz, mag 10 Hz.
+                if (has_gnss && now_ns - last_ekf_gnss_ts >= 200000000ULL) { // 5 Hz GPS
+                    gnss_delay.push(now_ns, gnss_data);
+                    last_ekf_gnss_ts = now_ns;
                 }
-                if (has_baro) {
-                    ekf.update_baro(baro_data);
+                if (has_baro && now_ns - last_ekf_baro_ts >= 100000000ULL) {  // 10 Hz baro
+                    baro_delay.push(now_ns, baro_data);
+                    last_ekf_baro_ts = now_ns;
                 }
                 if ((imu_data.mag[0] != 0.0 || imu_data.mag[1] != 0.0 || imu_data.mag[2] != 0.0) &&
-                    (imu_data.timestamp_ns - last_ekf_mag_ts >= 20000000ULL)) { // 50 Hz
-                    ekf.update_mag(imu_data.mag);
-                    last_ekf_mag_ts = imu_data.timestamp_ns;
+                    (now_ns - last_ekf_mag_ts >= 100000000ULL)) { // 10 Hz mag
+                    mag_delay.push(now_ns, {imu_data.mag[0], imu_data.mag[1], imu_data.mag[2]});
+                    last_ekf_mag_ts = now_ns;
                 }
+
+                GNSSData d_gnss;
+                if (gnss_delay.pop_due(now_ns, GPS_LATENCY_NS, d_gnss)) ekf.update_gnss(d_gnss);
+                BAROData d_baro;
+                if (baro_delay.pop_due(now_ns, BARO_LATENCY_NS, d_baro)) ekf.update_baro(d_baro);
+                std::array<double, 3> d_mag;
+                if (mag_delay.pop_due(now_ns, MAG_LATENCY_NS, d_mag)) ekf.update_mag(d_mag.data());
 
                 EstimatedState est;
                 bool has_est = ekf.get_estimated_state(est);
@@ -823,6 +893,7 @@ int main(int argc, char* argv[]) {
                     loi_valid = false;
                     yaw_ref_set = false;
                     pid_alt.reset(); pid_roll.reset(); pid_pitch.reset(); pid_yaw.reset();
+                    gyro_f[0] = gyro_f[1] = gyro_f[2] = 0.0f;
                     pwm_data.pwm_values = { 0.0f, 0.0f, 0.0f, 0.0f };
                     // Reposition the vehicle in the simulator (back to spawn) via RPC
                     try {
@@ -845,6 +916,9 @@ int main(int argc, char* argv[]) {
                     last_ekf_gnss_ts = 0;
                     last_ekf_baro_ts = 0;
                     last_ekf_mag_ts = 0;
+                    gnss_delay.clear();
+                    baro_delay.clear();
+                    mag_delay.clear();
                     fflush(stdout);
                 }
 
@@ -947,8 +1021,15 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // Autopilot control logic
-                if (is_takeoff_active && dt > 0.0f) {
+                // Autopilot control logic — 400 Hz control loop, decimated from the 1000 Hz
+                // IMU/EKF rate (ArduPilot structure: fast gyro sampling, slower control loop).
+                if (last_control_ts == 0 ||
+                    imu_data.timestamp_ns - last_control_ts >= 2 * CONTROL_PERIOD_NS)
+                    last_control_ts = imu_data.timestamp_ns - CONTROL_PERIOD_NS;   // (re)sync
+                bool control_tick = (imu_data.timestamp_ns - last_control_ts >= CONTROL_PERIOD_NS);
+                if (is_takeoff_active && control_tick) {
+                    last_control_ts += CONTROL_PERIOD_NS;
+                    float dt = CONTROL_DT;   // control-rate dt (1/400), shadows the 1/1000 loop dt
                     // Get current attitude from EKF
                     float qw = 1.0f, qx = 0.0f, qy = 0.0f, qz = 0.0f;
                     if (has_est) {
@@ -1074,9 +1155,9 @@ int main(int argc, char* argv[]) {
                     float target_yaw_rate = att_rate_gain_y * yaw_err;
 
                     // Inner loop: Rate PID
-                    float cr = pid_roll.compute(target_roll_rate, (float)imu_data.gyro[0], dt);
-                    float cp = pid_pitch.compute(target_pitch_rate, (float)imu_data.gyro[1], dt);
-                    float cy = pid_yaw.compute(target_yaw_rate, (float)imu_data.gyro[2], dt);
+                    float cr = pid_roll.compute(target_roll_rate, gyro_f[0], dt);
+                    float cp = pid_pitch.compute(target_pitch_rate, gyro_f[1], dt);
+                    float cy = pid_yaw.compute(target_yaw_rate, gyro_f[2], dt);
 
                     // --- 3. Actuator Mixer (airmode-style desaturation) ---
                     // Attitude (roll/pitch/yaw) torque mix per motor, WITHOUT collective.

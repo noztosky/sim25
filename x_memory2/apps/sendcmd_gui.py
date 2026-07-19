@@ -1,5 +1,8 @@
 import os
 import socket
+import subprocess
+import sys
+import threading
 import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
@@ -136,6 +139,10 @@ class SendCmdGUI:
         # Tab 3: Piloting (keyboard + mouse manual control)
         self.tab_pilot = tk.Frame(self.notebook, bg=self.bg_color)
         self.notebook.add(self.tab_pilot, text=" Piloting ")
+
+        # Tab 4: Auto-Tune (runs autotune.py, streams progress)
+        self.tab_tune = tk.Frame(self.notebook, bg=self.bg_color)
+        self.notebook.add(self.tab_tune, text=" Auto-Tune ")
 
         # --- Tab 1: Commands Contents ---
         # 2. System Commands Frame (Quick Actions)
@@ -289,6 +296,9 @@ class SendCmdGUI:
 
         # --- Tab 3: Piloting Setup ---
         self.setup_pilot_tab()
+
+        # --- Tab 4: Auto-Tune Setup ---
+        self.setup_tune_tab()
 
         # 5. Log Console Frame (Always visible at bottom)
         log_frame = tk.LabelFrame(
@@ -710,6 +720,135 @@ class SendCmdGUI:
                   f"pitch={pitch:+5.1f}  yaw={self.yaw_offset:+6.1f}"),
             fg=self.success_color)
         self.root.after(tick_ms, self.pilot_tick)
+
+    # ==================== Auto-Tune (runs autotune.py) ====================
+    def setup_tune_tab(self):
+        self._tune_proc = None
+        parent = self.tab_tune
+
+        note = tk.Label(
+            parent,
+            text=("Runs apps/autotune.py: commands attitude steps and searches PID gains.\n"
+                  "The simulator (sblocks.bat 1000) must be running. Auto-Tune OWNS SIL_App\n"
+                  "(restarts it each trial) — don't pilot at the same time. ~15-25 min."),
+            bg=self.bg_color, fg=self.warning_color, font=("Segoe UI", 8), justify="left")
+        note.pack(fill=tk.X, padx=10, pady=(6, 2))
+
+        cfg = tk.LabelFrame(parent, text=" Settings ", font=("Segoe UI", 9, "bold"),
+                            bg=self.card_bg, fg=self.fg_color, bd=0)
+        cfg.pack(fill=tk.X, padx=10, pady=4)
+        tk.Label(cfg, text="Phase:", bg=self.card_bg, fg=self.fg_color,
+                 font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", padx=5, pady=4)
+        self.tune_phase_var = tk.StringVar(value="attitude")
+        ttk.Combobox(cfg, textvariable=self.tune_phase_var, values=["attitude", "altitude"],
+                     width=10, state="readonly").grid(row=0, column=1, padx=5, pady=4)
+        tk.Label(cfg, text="Evals:", bg=self.card_bg, fg=self.fg_color,
+                 font=("Segoe UI", 9)).grid(row=0, column=2, sticky="w", padx=15, pady=4)
+        self.tune_evals_var = tk.StringVar(value="35")
+        tk.Entry(cfg, textvariable=self.tune_evals_var, bg=self.entry_bg, fg=self.fg_color,
+                 insertbackground="white", bd=0, width=6, justify="right").grid(row=0, column=3, padx=5, pady=4)
+
+        btns = tk.Frame(parent, bg=self.bg_color)
+        btns.pack(fill=tk.X, padx=10, pady=2)
+        self.tune_start_btn = tk.Button(btns, text="▶ Start Auto-Tune", font=("Segoe UI", 10, "bold"),
+                                        bg=self.success_color, fg=self.bg_color, bd=0, height=2,
+                                        command=self.start_autotune)
+        self.tune_start_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
+        tk.Button(btns, text="■ Stop", font=("Segoe UI", 10, "bold"),
+                  bg=self.danger_color, fg=self.fg_color, bd=0, height=2,
+                  command=self.stop_autotune).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
+
+        self.tune_status = tk.Label(parent, text="idle", bg=self.log_bg, fg="#888",
+                                    font=("Consolas", 10, "bold"), anchor="w", padx=8, pady=4)
+        self.tune_status.pack(fill=tk.X, padx=10, pady=2)
+
+        out_frame = tk.Frame(parent, bg=self.bg_color)
+        out_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+        self.tune_out = tk.Text(out_frame, bg=self.log_bg, fg="#7fd0ff", font=("Consolas", 8),
+                                bd=0, state=tk.DISABLED, height=10)
+        self.tune_out.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        sb = ttk.Scrollbar(out_frame, command=self.tune_out.yview)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tune_out.config(yscrollcommand=sb.set)
+
+    def _tune_write(self, text):
+        self.tune_out.config(state=tk.NORMAL)
+        self.tune_out.insert(tk.END, text)
+        self.tune_out.see(tk.END)
+        self.tune_out.config(state=tk.DISABLED)
+
+    def start_autotune(self):
+        if self._tune_proc is not None and self._tune_proc.poll() is None:
+            self.log("Auto-Tune already running.", is_error=True)
+            return
+        try:
+            evals = int(self.tune_evals_var.get())
+        except ValueError:
+            self.log("Evals must be an integer.", is_error=True)
+            return
+        phase = self.tune_phase_var.get()
+        autotune_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "autotune.py")
+        if not os.path.exists(autotune_py):
+            self.log(f"autotune.py not found at {autotune_py}", is_error=True)
+            return
+        cmd = [sys.executable, "-u", autotune_py, "--phase", phase, "--evals", str(evals)]
+        env = dict(os.environ, PYTHONIOENCODING="utf-8")
+        flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+        try:
+            self._tune_proc = subprocess.Popen(
+                cmd, cwd=os.path.dirname(autotune_py), stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, text=True, bufsize=1, env=env, creationflags=flags)
+        except Exception as e:
+            self.log(f"Failed to start Auto-Tune: {e}", is_error=True)
+            return
+        self.tune_out.config(state=tk.NORMAL)
+        self.tune_out.delete(1.0, tk.END)
+        self.tune_out.config(state=tk.DISABLED)
+        self.tune_status.config(text=f"running ({phase}, {evals} evals)...", fg=self.warning_color)
+        self.tune_start_btn.config(state=tk.DISABLED)
+        self.log(f"Auto-Tune started: phase={phase}, evals={evals}")
+        threading.Thread(target=self._autotune_reader, daemon=True).start()
+
+    def _autotune_reader(self):
+        try:
+            for line in self._tune_proc.stdout:
+                self.root.after(0, self._on_tune_line, line.rstrip("\n"))
+        except Exception:
+            pass
+        self.root.after(0, self._on_tune_done)
+
+    def _on_tune_line(self, line):
+        self._tune_write(line + "\n")
+        # live status from "[NN] ... (best=...)" lines and the BEST summary
+        if line.startswith("[") and "best=" in line:
+            head = line.split("|")[0].strip()
+            best = line.split("best=")[-1].rstrip(")")
+            self.tune_status.config(text=f"{head}  best={best}", fg=self.warning_color)
+
+    def _on_tune_done(self):
+        rc = self._tune_proc.poll() if self._tune_proc else None
+        self.tune_start_btn.config(state=tk.NORMAL)
+        if rc == 0:
+            self.tune_status.config(text="DONE — best gains written. Reloading PID tab...", fg=self.success_color)
+            self.log("Auto-Tune finished. Best gains saved to pid_params_z30.txt.")
+            self.load_pid_params()  # refresh the PID Tuning tab with the new gains
+        else:
+            self.tune_status.config(text=f"stopped/failed (rc={rc})", fg=self.danger_color)
+
+    def stop_autotune(self):
+        if self._tune_proc is not None and self._tune_proc.poll() is None:
+            try:
+                self._tune_proc.terminate()
+            except Exception:
+                pass
+            # autotune spawns SIL_App per trial; make sure it's not left running
+            subprocess.run(["taskkill", "/F", "/IM", "SIL_App.exe"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.tune_status.config(text="stopped", fg=self.danger_color)
+            self.tune_start_btn.config(state=tk.NORMAL)
+            self.log("Auto-Tune stopped.")
+        else:
+            self.log("Auto-Tune is not running.")
 
     def load_pid_params(self):
         script_dir = os.path.dirname(os.path.abspath(__file__))

@@ -569,7 +569,7 @@ namespace airlib
             params.rotor_params.C_P = 0.040164f;
             params.rotor_params.max_rpm = 2005.0f;
             params.rotor_params.propeller_diameter = 1.041f;
-            params.rotor_params.control_signal_filter_tc = 0.03f; //large prop/ESC spool-up slower than hobby quads (5ms), but >~50ms adds enough attitude-loop phase lag to destabilize pitch/roll
+            params.rotor_params.control_signal_filter_tc = 0.06f; //~60ms: computed spool-up tau from real specs (Hobbywing X11 G2: MFP 43x14 prop 146g -> J~0.011 kg.m^2, 95KV -> Kt=0.1005, R~0.08ohm). tau = J/(Kt^2/R + 2Q0/w0) ~= 58ms. Range 45-85ms (R uncertainty). Was 0.03 (artificially fast).
             params.rotor_params.calculateMaxThrust();
             //hover check: 40 kg -> 392 N -> 98 N/rotor = 55.6% of 176.5 N max
 
